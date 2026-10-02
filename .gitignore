@@ -1,0 +1,20 @@
+# This repo holds tools only. Documents, mail and every report the tools write stay out of it.
+*.pdf
+*.PDF
+*.emlx
+*.eml
+*.mbox
+*.json
+*.jsonl
+*.tsv
+*.csv
+*.bundle
+*.out
+_DERIVED/
+config.local.*
+.tmp_*
+__pycache__/
+.DS_Store
+
+# the example config is the one JSON that belongs in the repo
+!local_pipeline/config.example.json

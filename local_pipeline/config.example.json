@@ -1,0 +1,12 @@
+{
+ "_comment": "Copy to config.local.json (git-ignored) and fill in. Paths may use ~. Read by local_triage.py.",
+ "canary_file": "~/path/to/a-text-file-you-know-well.md",
+ "triage_canary_tokens": [
+  "<a word a correct card of that file must contain>",
+  "<a second word>",
+  "<a third>",
+  "<a fourth>"
+ ],
+ "triage_canary_min": 2,
+ "index_dir": "~/local_index"
+}
