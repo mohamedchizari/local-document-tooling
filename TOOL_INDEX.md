@@ -2,8 +2,8 @@
 
 | tool | what it does |
 |---|---|
-| `local_pipeline/extract_all.sh` | writes a text sidecar for every PDF under a folder; resumable; rebuilds the list of image-only PDFs on each run |
-| `local_pipeline/ocr_queue.sh` | OCRs the image-only PDFs that `extract_all.sh` listed; never changes an original |
+| `local_pipeline/extract_all.sh` | writes a text sidecar for every PDF under a folder; resumable; rebuilds the list of image-only PDFs (under 200 bytes of non-blank text, at least one image, not yet OCR'd) on each run |
+| `local_pipeline/ocr_queue.sh` | OCRs the image-only PDFs that `extract_all.sh` listed; never changes an original; exits with status 1 if a file failed |
 | `local_pipeline/env.sh` | sourced by the two scripts above: adds `PDFTOOLS_BIN` to PATH and moves `TMPDIR` under the home folder |
 | `local_pipeline/pii_sweep.sh` | finds hyphenated 3-2-4 IDs and 13 to 19 digit runs (card checksum tested) in the text sidecars; starts with a canary self-test |
 | `local_pipeline/mail_extract.sh` | lists the Apple Mail messages whose raw `.emlx` file contains a term (case-insensitive; encoded bodies are not searched); counts header-only files separately |
@@ -24,3 +24,5 @@
 | `tools/pii_guard.sh` | fails when a tracked file carries a home path, a hyphenated 3-2-4 ID, a 13 to 19 digit run or a real email address |
 | `tools/stamp.sh` | prints the current time in UTC and local time, for log lines |
 | `tools/datecheck.sh` | prints the HTTP `Date` header of several public sites next to the local clock |
+| `tests/run_checks.sh` | checks the PDF text pipeline and the amount patterns of `scan_intake.py` against generated fixtures; PASS or FAIL per assertion |
+| `tests/make_fixtures.py` | writes the made-up PDFs the check script uses |

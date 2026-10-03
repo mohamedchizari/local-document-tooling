@@ -28,7 +28,10 @@ set -uo pipefail
 
 ROOT="${1:-${ARCHIVE_ROOT:-}}"
 [ -n "$ROOT" ] && [ -d "$ROOT" ] || { echo "usage: bash pii_sweep.sh <archive-root>   (or set ARCHIVE_ROOT)"; exit 2; }
-ROOT="$(cd "$ROOT" && pwd -P)"
+GIVEN="$ROOT"
+case "$ROOT" in /*) ;; *) ROOT="./$ROOT" ;; esac      # so a folder named - or -x is a path, not an option
+ROOT="$(CDPATH= cd -- "$ROOT" 2>/dev/null && pwd -P)"
+[ -n "$ROOT" ] || { echo "ABORT: cannot enter the archive root: $GIVEN"; exit 2; }
 DERIVED="$ROOT/_DERIVED/text"
 OUT="$ROOT/_DERIVED/_pii_sweep_$(date +%Y-%m-%d).txt"
 

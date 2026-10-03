@@ -47,10 +47,46 @@ MONTHS = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec'
 DATE = r'(?:\d{1,2}/\d{1,2}/\d{2,4}|(?:' + MONTHS + r')[a-z]*\.? \d{1,2},? \d{4})'
 RX = {
  'closing_line': re.compile(r'(Closing Date|Statement (?:Closing )?Date|Billing Period)([^\n]{0,80})', re.I),
- 'new_balance': re.compile(r'New Balance[^\n$]{0,30}\$?\s*([\d,]+\.\d{2})', re.I),
- 'min_due': re.compile(r'Minimum (?:Payment )?Due[^\n$]{0,30}\$?\s*([\d,]+\.\d{2})', re.I),
  'first_page': re.compile(r'(?:Page 1 of \d+|Payment Due Date|New Balance)', re.I),
+ # used only to recognise a first page; amount() below reads the figure
+ 'balance_line': re.compile(r'New Balance[^\n$]{0,30}\$?\s*[\d,]+\.\d{2}', re.I),
 }
+
+# Amounts. A signed amount is a currency sign, then digits and commas, a point and two digits.
+# An unsigned one has no sign to mark it, so it is guarded: it may not start inside another number
+# or directly after a point or a slash, and it may not be followed by a digit, a slash, a percent sign
+# (directly or after one white-space character) or a point and a digit. A rate ("21.99%") or a dotted date ("15.01.2030") is
+# then not taken for an amount. A date written "15.01." with nothing after the last point still is.
+SIGNED = r'\$\s*(\d[\d,]*\.\d{2})(?!\d)'
+UNSIGNED = r'(?<![\d.,/])(\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
+LABEL = {
+ 'new_balance': re.compile(r'New Balance', re.I),
+ 'min_due': re.compile(r'Minimum (?:Payment )?Due', re.I),
+}
+# What may follow a label, tried in this order at each place the label occurs:
+#   1. a signed amount directly after it, on the same line
+#   2. an unsigned amount directly after it, with only white space or colons between, on the same
+#      line or a line below
+#   3. a signed amount after up to 30 characters of other text on the label's line
+#   4. the nearest unsigned amount after up to 30 characters of other text on the label's line and
+#      any white space after that, line breaks included
+#      (the filler is lazy: a greedy one eats all but the last digit before the point)
+AFTER_LABEL = [re.compile(x) for x in (
+    r'[ \t:]*' + SIGNED,
+    r'[\s:]*' + UNSIGNED,
+    r'[^\n$]{0,30}' + SIGNED,
+    r'[^\n$]{0,30}?\s*' + UNSIGNED,
+)]
+
+
+def amount(key, t):
+    """The amount that goes with a label ('new_balance' or 'min_due'), or '' if none is found."""
+    for m in LABEL[key].finditer(t):
+        for rx in AFTER_LABEL:
+            a = rx.match(t, m.end())
+            if a:
+                return a.group(1)
+    return ''
 
 
 # The last four digits of the account, tried in this order:
@@ -93,12 +129,11 @@ def index(d, out, issuers_file=None):
         cur = None
         for i, t in enumerate(pages, 1):
             if len(t.strip()) < 25: blanks.append((fn, i)); continue
-            if RX['first_page'].search(t) and (closing_date(t) or RX['new_balance'].search(t)):
+            if RX['first_page'].search(t) and (closing_date(t) or RX['balance_line'].search(t)):
                 if cur: rows.append(cur)
-                g = lambda k: (RX[k].search(t).group(1) if RX[k].search(t) else '')
                 iss = next((s for s in issuers if re.search(r'\b' + re.escape(s) + r'\b', t, re.I)), '')
                 cur = dict(file=fn, first_page=i, issuer=iss, last4=last4(t), closing_date=closing_date(t),
-                           new_balance=g('new_balance'), min_due=g('min_due'), pages=1)
+                           new_balance=amount('new_balance', t), min_due=amount('min_due', t), pages=1)
             elif cur: cur['pages'] += 1
         if cur: rows.append(cur)
     with open(out, 'w', newline='') as fh:
