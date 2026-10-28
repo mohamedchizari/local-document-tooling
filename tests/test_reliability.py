@@ -2,6 +2,7 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -322,6 +323,118 @@ printf 'HTTP/1.1 403 Forbidden\r\nDate: Wed, 01 Jan 2031 00:00:00 GMT\r\n\r\n'
             self.assertIn('Date: Wed, 01 Jan 2031', result.stdout)
             self.assertIn('403', result.stdout)
 
+    def test_dash_leaders_read_as_a_positive_amount(self):
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance -----1,234.56'), '1,234.56')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance -- 1,234.56'), '1,234.56')
+        self.assertEqual(scan_intake.amount('min_due', 'Minimum Payment Due ----25.00'), '25.00')
+        # a single minus attached to the figure is still a sign
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance -1,234.56'), '-1,234.56')
+
+    def test_unicode_minus_keeps_the_sign(self):
+        minus = '−'
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance ' + minus + '$50.00'), '-50.00')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance ' + minus + '50.00'), '-50.00')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance ' + minus + ' 50.00'), '50.00')
+        # the minus sits first in the character class: a colon or a letter before the figure is fine
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance:1,234.56'), '1,234.56')
+
+    def test_large_image_listing_is_not_a_failed_check(self):
+        # The listing of a scan with thousands of images is bigger than a pipe buffer. Reading it
+        # must not end in a broken pipe, which under pipefail looked like a failed check.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            self._write_extractor_fakes(fakebin)
+            archive = root / 'archive'
+            archive.mkdir()
+            source = archive / 'big scan.pdf'
+            source.write_bytes(b'pdf')
+            result = self._extract(archive, fakebin, root, FAKE_RASTER='1', FAKE_RASTER_LINES='5000')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            queue = list((archive / '_DERIVED').glob('_image_only_*.txt'))[0]
+            self.assertEqual(queue.read_bytes(), os.fsencode(os.path.realpath(source)) + b'\0')
+            log = list((archive / '_DERIVED').glob('_extract_log_*.txt'))[0].read_text()
+            self.assertNotIn('FAIL_IMAGE_CHECK', log)
+            self.assertIn('5000 rasters', log)
+
+    def test_ocr_done_file_with_failed_image_check_is_not_a_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            self._write_extractor_fakes(fakebin)
+            self._write_fake_ocrmypdf(fakebin)
+            archive = root / 'archive'
+            archive.mkdir()
+            source = archive / 'scan.pdf'
+            source.write_bytes(b'pdf')
+            past = source.stat().st_mtime - 120     # older than anything the run writes, also to the second
+            os.utime(source, (past, past))
+            first = self._extract(archive, fakebin, root, FAKE_RASTER='1')
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            ocr = subprocess.run(
+                ['bash', str(ROOT / 'local_pipeline/ocr_queue.sh'), str(archive)],
+                capture_output=True, text=True, env=self._env(fakebin, root, OCR_YES='1'), timeout=60)
+            self.assertEqual(ocr.returncode, 0, ocr.stdout + ocr.stderr)
+            for _ in range(2):
+                again = self._extract(archive, fakebin, root, FAKE_IMAGE_FAIL='1')
+                self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+            queue = list((archive / '_DERIVED').glob('_image_only_*.txt'))[0]
+            self.assertEqual(queue.read_bytes(), b'')
+            log = list((archive / '_DERIVED').glob('_extract_log_*.txt'))[0].read_text()
+            self.assertNotIn('FAIL_IMAGE_CHECK', log)
+
+    def test_legacy_queue_is_left_whole_when_its_rewrite_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            self._write_extractor_fakes(fakebin)
+            self._write_fake_ocrmypdf(fakebin)
+            archive = root / 'archive'
+            (archive / '_DERIVED').mkdir(parents=True)
+            queue = archive / '_DERIVED' / '_image_only_2030-01-15.txt'
+            base = os.fsencode(os.path.realpath(archive))
+            original = b''.join(base + b'/folder-%04d/statement-scan-%04d.pdf\n' % (i, i) for i in range(400))
+            queue.write_bytes(original)
+            # A file size limit makes the rewrite fail part way, as a full disk would.
+            script = "trap '' XFSZ; ulimit -f 8; exec bash %s %s" % (
+                shlex.quote(str(ROOT / 'local_pipeline/ocr_queue.sh')), shlex.quote(str(archive)))
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
+                                    env=self._env(fakebin, root), stdin=subprocess.DEVNULL, timeout=60)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('could not convert', result.stdout)
+            self.assertEqual(queue.read_bytes(), original)
+            self.assertEqual(list((archive / '_DERIVED').glob('*.part.*')), [])
+
+    def test_widget_dump_skips_a_file_pypdf_cannot_read(self):
+        try:
+            from pypdf import PdfWriter
+        except ImportError:
+            self.skipTest('pypdf is not installed (widget_dump.py needs it)')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            self._write(fakebin / 'pdftotext', """#!/bin/sh
+printf '<page width="612" height="792"></page>'
+""")
+            (root / 'bad.pdf').write_bytes(b'this is not a PDF file\n')
+            w = PdfWriter()
+            w.add_blank_page(width=612, height=792)
+            with open(root / 'good.pdf', 'wb') as fh:
+                w.write(fh)
+            env = os.environ.copy()
+            env['PATH'] = str(fakebin) + os.pathsep + env['PATH']
+            result = subprocess.run(
+                [sys.executable, str(ROOT / 'pdf_forms/widget_dump.py'), str(root / 'bad.pdf'), str(root / 'good.pdf')],
+                capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('could not be read', result.stderr)
+            self.assertNotIn('Traceback', result.stderr)
+            self.assertIn('##### ' + str(root / 'good.pdf'), result.stdout)
+
     @staticmethod
     def _write(path, content):
         path.write_text(content)
@@ -340,7 +453,23 @@ printf 'short' > "$last"
 if [ "${FAKE_IMAGE_FAIL:-0}" = 1 ]; then exit 2; fi
 printf 'page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio\\n'
 printf '%s\\n' '--------------------------------------------------------------------------------'
-if [ "${FAKE_RASTER:-0}" = 1 ]; then printf '%s\\n' '1 0 image 100 100 rgb 3 8 jpeg no 1 0 72 72 1K 1%'; fi
+if [ "${FAKE_RASTER:-0}" = 1 ]; then
+  n=${FAKE_RASTER_LINES:-1}; i=0
+  while [ "$i" -lt "$n" ]; do i=$((i+1)); printf '%s\\n' "1 $i image 100 100 rgb 3 8 jpeg no 1 0 72 72 1K 1%"; done
+fi
+""")
+
+    def _write_fake_ocrmypdf(self, fakebin):
+        self._write(fakebin / 'ocrmypdf', """#!/bin/sh
+side=
+last=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--sidecar" ]; then side="$2"; shift 2
+  else last="$1"; shift
+  fi
+done
+printf 'recognized text' > "$side"
+printf 'ocr pdf' > "$last"
 """)
 
     @staticmethod

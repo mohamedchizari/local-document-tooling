@@ -12,7 +12,8 @@
 # "Newer" is by modification time. To force a re-read, delete the sidecar and the OCR copy.
 # Read-only on sources: never modifies, moves or deletes a source file.
 # Output goes under <archive-root>/_DERIVED/. Runs on macOS bash 3.2 and Linux.
-# Exits 1 if any PDF extraction or short-text image check fails.
+# Exits 1 if any PDF extraction fails, or the image check fails on a short-text PDF that has not
+# been OCR'd yet (that PDF is then queued for OCR).
 # Needs: poppler (pdftotext, pdfimages). PDFTOOLS_BIN and OCR_TMPDIR are read by env.sh.
 
 . "$(dirname "$0")/env.sh" 2>/dev/null || true
@@ -88,13 +89,19 @@ for f in "${FILES[@]}"; do
     #   raster images and no text    -> a scan; it needs OCR
     #   no raster images and no text -> a short document, already fully read
     # Without this test, every short cover page lands in the OCR queue.
-    if listing=$(pdfimages -list "$f" 2>/dev/null) && printf '%s\n' "$listing" | grep -q '^page[[:space:]]'; then
+    # The header test is a case, not a pipe into grep -q: under pipefail, grep quitting early on a
+    # listing bigger than a pipe buffer broke the pipe and looked like a failed check.
+    rasters=0
+    if listing=$(pdfimages -list "$f" 2>/dev/null) && case "$listing" in page[[:space:]]*) true ;; *) false ;; esac; then
       rasters=$(printf '%s\n' "$listing" | awk 'NR > 2 && $1 ~ /^[0-9]+$/ { n++ } END { print n+0 }')
+    elif [ "$ocrd" = 1 ]; then
+      # OCR has been run since the PDF last changed, so the check would only decide whether to queue
+      # it again, and it is not queued again. A failed check is noted, not counted as a failure.
+      rasters=-1
+      [ "$fresh" = 1 ] && echo "OCR_DONE_IMAGE_CHECK_FAILED  ${chars} chars  $rel" >> "$LOG"
     else
-      if [ "$ocrd" != 1 ]; then
-        printf '%s\0' "$f" >> "$IMAGEONLY"
-        img_n=$((img_n+1))
-      fi
+      printf '%s\0' "$f" >> "$IMAGEONLY"
+      img_n=$((img_n+1))
       fail_n=$((fail_n+1))
       echo "FAIL_IMAGE_CHECK  $rel" >> "$LOG"
       if [ "$fresh" = 1 ]; then
@@ -105,11 +112,13 @@ for f in "${FILES[@]}"; do
       fi
       continue
     fi
-    if [ "${rasters:-0}" -gt 0 ] && [ "$ocrd" = 1 ]; then
+    if [ "$rasters" -lt 0 ]; then
+      :                           # OCR'd, check failed: noted above
+    elif [ "$rasters" -gt 0 ] && [ "$ocrd" = 1 ]; then
       # OCR has been run since the PDF last changed. A page with almost nothing on it has been read
       # once it has been OCR'd; it is not queued again.
       [ "$fresh" = 1 ] && echo "OCR_DONE_LITTLE_TEXT  ${chars} chars  ${rasters} rasters  $rel" >> "$LOG"
-    elif [ "${rasters:-0}" -gt 0 ]; then
+    elif [ "$rasters" -gt 0 ]; then
       printf '%s\0' "$f" >> "$IMAGEONLY"; img_n=$((img_n+1))
       [ "$fresh" = 1 ] && echo "IMAGE_ONLY  ${chars} chars  ${rasters} rasters  $rel" >> "$LOG"
     elif [ "$fresh" = 1 ]; then

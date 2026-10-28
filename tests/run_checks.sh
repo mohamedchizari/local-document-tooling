@@ -178,6 +178,8 @@ cases = [
  ('new_balance', 'New Balance 1,234.567', None),
  ('new_balance', 'New Balance none', None),
  ('new_balance', 'New Balance -$50.00', '-50.00'),
+ ('new_balance', 'New Balance -----1,234.56', '1,234.56'),
+ ('new_balance', 'New Balance \u2212$50.00', '-50.00'),
  ('new_balance', 'New Balance' + ' ' * 40 + '1,234.56', '1,234.56'),
  ('new_balance', 'New Balance   Minimum Payment Due\n1,234.56   25.00', '1,234.56'),
  ('min_due', 'New Balance   Minimum Payment Due\n1,234.56   25.00', '1,234.56'),
@@ -198,7 +200,19 @@ D="$W/idx"; mkdir -p "$D"
 printf 'Made-up issuer Chase\nPage 1 of 1\nAccount ending in 4321\nStatement Closing Date 01/15/2030\nNew Balance 1,234.56\nMinimum Payment Due 35.00\n' > "$D/typed.txt"
 "$PY" "$TREE/scan_intake/scan_intake.py" index "$D" "$W/idx_out.csv" >/dev/null 2>&1
 ok "11z index row: Chase,4321,01/15/2030,\"1,234.56\",35.00" 'grep -q "typed.txt,1,Chase,4321,01/15/2030,\"1,234.56\",35.00,1" "$W/idx_out.csv"'
-ok "17 focused reliability regressions" '"$PY" -m unittest discover -s "$TREE/tests" -p "test_reliability.py"'
+# The Python regressions. A test that cannot run here is skipped by name, and then the line says SKIP,
+# not PASS, and lists what was skipped.
+rel_out=$("$PY" -m unittest discover -v -s "$TREE/tests" -p "test_reliability.py" 2>&1); rel_rc=$?
+rel_ran=$(printf '%s\n' "$rel_out" | sed -n 's/^Ran \([0-9][0-9]*\) tests*.*/\1/p' | tail -1)
+rel_skip=$(printf '%s\n' "$rel_out" | grep -c ' \.\.\. skipped')
+if [ "$rel_rc" -ne 0 ] || [ -z "$rel_ran" ]; then
+  fail=$((fail+1)); echo "FAIL  focused reliability regressions"; printf '%s\n' "$rel_out" | tail -40
+elif [ "$rel_skip" -gt 0 ]; then
+  echo "SKIP  focused reliability regressions: $rel_ran ran, $rel_skip of them skipped:"
+  printf '%s\n' "$rel_out" | grep ' \.\.\. skipped' | sed 's/^/        /'
+else
+  pass=$((pass+1)); echo "PASS  $rel_ran focused reliability regressions"
+fi
 
 echo
 echo "TOTAL: pass $pass, fail $fail"

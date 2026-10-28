@@ -7,8 +7,9 @@ two rows, each with its own state.
 
 Usage: python3 widget_dump.py form.pdf [more.pdf ...]
        WIDGET_VALUE_CONTAINS=<text> python3 widget_dump.py form.pdf     (only widgets whose value contains the text)
-Needs: pypdf, and pdftotext (poppler) on PATH for the labels. A file pdftotext cannot read is skipped
-with a warning; the others are still listed, and the exit status is 1 if any file was skipped.
+Needs: pypdf, and pdftotext (poppler) on PATH for the labels. A file that pypdf or pdftotext cannot
+read is skipped with a warning; the others are still listed, and the exit status is 1 if any file was
+skipped.
 """
 import html
 import os
@@ -35,7 +36,13 @@ def inherited(widget, key, default=None):
 
 
 def dump(path):
-    reader = PdfReader(path)
+    try:
+        reader = PdfReader(path)
+        n_pages = len(reader.pages)
+    except Exception as exc:  # a damaged or non-PDF file: say so and go on with the next one
+        print(f"WARNING: {path} could not be read as a PDF ({type(exc).__name__}: {exc}); skipped",
+              file=sys.stderr)
+        return False
     result = subprocess.run(['pdftotext', '-bbox', path, '-'], capture_output=True, text=True)
     if result.returncode:
         detail = result.stderr.strip() or f'exit status {result.returncode}'
@@ -43,7 +50,7 @@ def dump(path):
         return False
     xml = result.stdout
     pages = xml.split('<page ')[1:]
-    print('#####', path, len(reader.pages), 'pp')
+    print('#####', path, n_pages, 'pp')
     for pi, page in enumerate(reader.pages, 1):
         pg = pages[pi - 1] if pi <= len(pages) else ''
         hm = re.search(r'height="([\d.]+)"', pg)

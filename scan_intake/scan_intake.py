@@ -17,6 +17,8 @@ Three steps, each re-runnable, none calls a language model:
   index    DIR  OUT.csv  [--issuers issuers.txt]
       Reads every *.txt sidecar in DIR, finds statement first-pages, and writes one CSV row per
       statement: file, first_page, issuer, last4, closing_date, new_balance, min_due, pages.
+      A credit written with a trailing minus ("$50.00-"), "CR" after it or in parentheses ("($50.00)")
+      is indexed as a positive amount: check the amounts against the page.
       Pages with < 25 characters are counted as blank (the backs of most statements) and listed
       in a second CSV (OUT_blank_pages.csv) so they can be dropped. A count by issuer, last four and
       year prints at the end.
@@ -59,12 +61,19 @@ RX = {
 # Amounts. A signed amount is a currency sign, then digits and commas, a point and two digits; a minus
 # directly in front of the currency sign makes it negative. An unsigned amount is negative only when a
 # minus is attached to its first digit: "New Balance - 50.00" reads the hyphen as a separator (50.00).
+# A minus is the hyphen-minus or the Unicode minus sign (U+2212); the amount returned always uses the
+# hyphen-minus. Two or more hyphens before a figure are leaders, not a sign: "New Balance -----1,234.56"
+# reads 1,234.56. Other ways of writing a credit are NOT recognised and are read as positive: a
+# trailing minus ("$50.00-"), "CR" after the figure ("50.00 CR") and parentheses ("($50.00)").
 # An unsigned one has no sign to mark it, so it is guarded: it may not start inside another number
 # or directly after a point or a slash, and it may not be followed by a digit, a slash, a percent sign
 # (directly or after one white-space character) or a point and a digit. A rate ("21.99%") or a dotted date ("15.01.2030") is
 # then not taken for an amount. A date written "15.01." with nothing after the last point still is.
-SIGNED = r'(-?\$\s*\d[\d,]*\.\d{2})(?!\d)'
-UNSIGNED = r'(?<![\d.,/-])(-?\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
+MINUS = '-\u2212'      # first in any character class, so the hyphen is never read as a range
+SIGNED = r'([' + MINUS + r']?\$\s*\d[\d,]*\.\d{2})(?!\d)'
+UNSIGNED = r'(?<![' + MINUS + r'\d.,/])([' + MINUS + r']?\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
+# after leaders: no sign of its own, and the same guard after the figure
+AFTER_LEADERS = r'-{2,}[ \t]*(\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
 LABEL = {
  'new_balance': re.compile(r'New Balance', re.I),
  'min_due': re.compile(r'Minimum (?:Payment )?Due', re.I),
@@ -73,6 +82,7 @@ LABEL = {
 #   1. a signed amount directly after it, on the same line
 #   2. an unsigned amount directly after it, with only white space or colons between, on the same
 #      line or a line below
+#   2a. a run of two or more hyphens (leaders) and then an unsigned figure, on the label's line
 #   3. a signed amount after up to 30 characters of other text on the label's line
 #   4. the nearest unsigned amount after up to 30 characters of other text on the label's line and
 #      any white space after that, line breaks included
@@ -80,6 +90,7 @@ LABEL = {
 AFTER_LABEL = [re.compile(x) for x in (
     r'[ \t:]*' + SIGNED,
     r'[\s:]*' + UNSIGNED,
+    r'[ \t:]*' + AFTER_LEADERS,
     r'[^\n$]{0,30}' + SIGNED,
     r'[^\n$]{0,30}?\s*' + UNSIGNED,
 )]
@@ -91,7 +102,7 @@ def amount(key, t):
         for rx in AFTER_LABEL:
             a = rx.match(t, m.end())
             if a:
-                return ''.join(a.group(1).replace('$', '').split())
+                return ''.join(a.group(1).replace('$', '').replace('\u2212', '-').split())
     return ''
 
 

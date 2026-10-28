@@ -48,7 +48,10 @@ image-only list on every run, so that a scan stays listed until it has been OCR'
 of a PDF that was already OCR'd has to be written again, it is written from the OCR copy, which has
 the text. A failed extraction writes only to a temporary sidecar and cannot leave a newer partial
 file that a later run mistakes for complete. `pdfimages` must be available; if its check fails on a
-short-text PDF, that file is conservatively queued and the sweep exits nonzero. The image queue is
+short-text PDF that has not been OCR'd yet, that file is conservatively queued and the sweep exits
+nonzero. For a PDF already OCR'd since it last changed, a failed check is logged and is not a failure,
+since the check would only decide whether to queue it again. The `pdfimages` listing is tested without
+a pipe, so a listing of thousands of images cannot break the pipe and look like a failed check. The image queue is
 NUL-delimited, so source filenames may contain line breaks; `ocr_queue.sh` converts an older
 newline-delimited queue before using it.
 
@@ -82,7 +85,10 @@ An OCR'd copy of the PDF goes under `_DERIVED/ocr_pdf/`, named after the whole f
 starts, unless `OCR_YES=1` is set; if no answer can be read (no keyboard), it says so and exits with
 status 1. Skips a file whose sidecar exists and whose OCR copy is newer than the PDF. Writes both
 outputs under temporary names and renames them only when the OCR succeeded, so a failed run leaves
-nothing that looks finished. Prints four counts (OCR'd, already done, failed, missing) and exits
+nothing that looks finished. A queue in the older one-path-per-line format is rewritten to a
+temporary copy first; the copy replaces it only when every write succeeded and it holds as many paths
+as the old queue had lines, otherwise the old queue is left as it was and the run stops with status
+1. Prints four counts (OCR'd, already done, failed, missing) and exits
 with status 1 if any file failed or was missing. `env.sh` moves the OCR staging directory under the
 home folder, because OCR launched from a non-login shell may be unable to read files under `/tmp`.
 
@@ -269,8 +275,11 @@ issuer, last four or date; those rows need a look.
   one further along the line, and of two unsigned figures the nearer one is taken, whatever it is.
   When two labels sit side by side above their figures, unsigned figures are read wrongly (the
   second label takes the first figure) and signed ones are left blank. A minus attached to the figure, or
-  directly before its currency sign, is kept in indexed amounts; a hyphen followed by a space is read
-  as a separator, not a sign. Check the amounts against the page.
+  directly before its currency sign, is kept in indexed amounts, whether it is a hyphen-minus or the
+  Unicode minus sign (U+2212); a hyphen followed by a space is read as a separator, and a run of two or
+  more hyphens before a figure as leaders, not a sign. A credit written any other way is indexed
+  as a positive amount: a trailing minus (`$50.00-`), `CR` after the figure (`50.00 CR`) or
+  parentheses (`($50.00)`). Check the amounts against the page.
 - The index step does not print how many sidecars or pages it read. A first page that the patterns
   do not recognise is counted nowhere: it is added to the page count of the statement before it, or
   dropped if it comes first.
@@ -350,7 +359,8 @@ most 400,000 characters of text per PDF, and has no handling for a locked PDF. E
 the total page count, pages selected (`ocr_pages`, as before), pages successfully recognized
 (`recognised_pages`), failed and unprocessed page counts, a `coverage_complete` flag, the character
 count and any error. A blank page whose Vision
-request completed counts as processed even though it contributes no text.
+request completed counts as processed even though it contributes no text, so `coverage_complete` can
+be true for a PDF that gave no text at all: look for a character count of zero as well.
 
 ## Repository utilities (`tools/`)
 
@@ -424,8 +434,10 @@ shell assertions and focused Python regression tests over generated inputs (a te
 a one-page scan, a nearly blank scan, a 210-page scan, an OCR stand-in that fails after writing
 partial output, a root folder with `[`, `*` and `?` in its name, and two files that differ only in
 the case of the extension). It
-was run on Linux and on macOS with bash 3.2. On a file system that does not tell `a.pdf` from
-`a.PDF`, the five assertions on that pair are skipped.
+was run on Linux and on macOS with bash 3.2, the Python regressions included. On a file system that
+does not tell `a.pdf` from `a.PDF`, the five assertions on that pair are skipped. A Python regression
+that cannot run where it is (the form-dump tests need pypdf) is skipped by name, and the script then
+reports the regressions as SKIP, not PASS.
 
 Remaining behavior was checked by hand. Every document fixture is made up. Two kinds of tool need the
 machine itself: the mail tools were run against a local mail store, with only the counts they
@@ -442,9 +454,11 @@ Two defects in the first published version were found by reading the code agains
 of 200 pages or more was never listed for OCR, because the test counted bytes and the extractor
 writes one byte per page. An amount printed without a currency sign was indexed as its last digit
 and the cents. Both are fixed, and the check script holds a case for each. The reliability regressions
-also cover negative balances and hyphen separators, extraction/OCR failures, duplicate comparisons,
-remote cleartext model URLs, datecheck failures and error responses, form-dump failures, worktree
-backups and refused subfolders, and OCR coverage counters.
+also cover negative balances, hyphen separators, dash leaders and the Unicode minus, extraction/OCR
+failures, a listing of thousands of images, an OCR'd file whose image check fails, a queue rewrite
+that fails part way, duplicate comparisons, remote cleartext model URLs, datecheck failures and error
+responses, form-dump failures (files that pdftotext or pypdf cannot read), worktree backups and
+refused subfolders, and OCR coverage counters.
 
 No sample documents ship with the repository. The check script generates its fixtures, and every
 value in them is invented.

@@ -36,8 +36,9 @@ output of the same name without asking.
 **The only things they delete are their own temporary files:** the canary file of `pii_sweep.sh`,
 the partial sidecar of a failed extraction in `extract_all.sh`, the partial outputs of a failed OCR
 in `ocr_queue.sh`, the page images of the Vision OCR tools and the work folder of
-`backup_repo_bundle.sh`. `ocr_queue.sh` also rewrites a queue file in the old one-path-per-line
-format (its own earlier output) in place, and removes its temporary copy if the rewrite fails.
+`backup_repo_bundle.sh`. `ocr_queue.sh` also replaces a queue file in the old one-path-per-line
+format (its own earlier output) with a rewritten copy, only when every path was written to the copy;
+if not, it removes the copy and leaves the old queue as it was.
 `restore_test_bundle_chain.sh` leaves its scratch clone in place. It prints where the clone is when
 the test runs, and not when it stops with status 2.
 

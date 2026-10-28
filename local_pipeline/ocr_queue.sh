@@ -30,13 +30,28 @@ QUEUE=$(ls -t "$ROOT/_DERIVED"/_image_only_*.txt 2>/dev/null | head -1)
 command -v ocrmypdf >/dev/null || { echo "FATAL: ocrmypdf missing (see env.sh)."; exit 1; }
 [ -n "${QUEUE:-}" ] && [ -s "$QUEUE" ] || { echo "No image-only PDFs queued. Run extract_all.sh first; if it reported 0 image-only, there is nothing to OCR."; exit 1; }
 
-# Convert a queue written by older versions (one path per line) before reading it.
+# Convert a queue written by older versions (one path per line) before reading it. The new copy
+# replaces the old one only when every write succeeded and it holds as many paths as the old one had
+# lines, so a full disk cannot leave a shortened queue in place of the whole one.
 if LC_ALL=C tr -d '\000' < "$QUEUE" | cmp -s "$QUEUE" -; then
   tmp_queue="${QUEUE}.part.$$"
+  want=0; wrote_ok=1
   while IFS= read -r f || [ -n "$f" ]; do
-    [ -n "$f" ] && printf '%s\0' "$f"
-  done < "$QUEUE" > "$tmp_queue"
-  mv -f "$tmp_queue" "$QUEUE" || { rm -f "$tmp_queue"; echo "FATAL: could not convert the legacy image-only queue"; exit 1; }
+    [ -n "$f" ] || continue
+    want=$((want+1))
+    printf '%s\0' "$f" || { wrote_ok=0; break; }
+  done < "$QUEUE" > "$tmp_queue" || wrote_ok=0
+  got=0
+  if [ "$wrote_ok" = 1 ]; then
+    while IFS= read -r -d '' _converted; do got=$((got+1)); done < "$tmp_queue"
+  fi
+  if [ "$wrote_ok" = 1 ] && [ "$got" -eq "$want" ] && mv -f "$tmp_queue" "$QUEUE"; then
+    :
+  else
+    rm -f "$tmp_queue"
+    echo "FATAL: could not convert the legacy image-only queue; it was left as it was: $QUEUE"
+    exit 1
+  fi
 fi
 
 N=0
