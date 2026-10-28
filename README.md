@@ -1,7 +1,8 @@
 # Local document and mail tooling (macOS)
 
 Small command-line tools for working through a large personal archive of PDFs, scanned paper and
-Apple Mail on a Mac. The document and mail tools run locally and call no web service.
+Apple Mail on a Mac. The document and mail tools run locally and call no web service; the two
+local-model tools send text to a server elsewhere only when `OLLAMA_ALLOW_REMOTE=1` is set.
 
 The archive this was built for is private, and much of the work on it is done by an AI assistant
 running on the owner's Mac. So the tools share a few habits, and each habit is code and not a line in
@@ -24,8 +25,8 @@ guard rails.
 Two utilities in `tools/` do reach outside the machine, by design: `backup_repo_bundle.sh` copies a git
 bundle to a backup folder you name (which may be one that syncs to a cloud), and `datecheck.sh` reads
 the `Date` header of a few public websites. The two local-model tools send text to the address in
-`OLLAMA_URL`, which defaults to loopback. Sending text to a non-loopback HTTP Ollama server requires
-`OLLAMA_ALLOW_REMOTE=1`; HTTPS endpoints are allowed without that opt-in.
+`OLLAMA_URL`, which defaults to loopback. Sending text to any server that is not on this machine,
+over HTTP or HTTPS, requires `OLLAMA_ALLOW_REMOTE=1`.
 
 `TOOL_INDEX.md` lists every tool in one line each. The header of each file gives its usage and, where
 they apply, the environment variables it reads and what it needs installed.

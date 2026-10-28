@@ -159,8 +159,16 @@ printf 'ocr pdf' > "$last"
             local_triage.validate_ollama_url('@'.join(('https://user:password', 'ollama.example')))
         with self.assertRaises(SystemExit):
             local_triage.validate_ollama_url('https://ollama.example?token=example')
-        self.assertEqual(local_triage.validate_ollama_url('https://ollama.example'), 'https://ollama.example')
         self.assertEqual(local_triage.validate_ollama_url('http://localhost:11434/'), 'http://localhost:11434')
+
+    def test_remote_https_ollama_requires_opt_in_too(self):
+        # an HTTPS server that is not on this machine still receives the document text
+        with mock.patch.dict(os.environ, {'OLLAMA_ALLOW_REMOTE': '0'}):
+            with self.assertRaises(SystemExit):
+                local_triage.validate_ollama_url('https://ollama.example')
+            self.assertEqual(local_triage.validate_ollama_url('https://localhost:11434'), 'https://localhost:11434')
+        with mock.patch.dict(os.environ, {'OLLAMA_ALLOW_REMOTE': '1'}):
+            self.assertEqual(local_triage.validate_ollama_url('https://ollama.example'), 'https://ollama.example')
 
     def test_ask_local_refuses_remote_http_without_sending_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,7 +187,28 @@ printf 'NAME ID SIZE MODIFIED\\nstub:latest id 1GB today\\n'
                 ['bash', str(ROOT / 'local_pipeline/ask_local.sh'), 'classify'],
                 input='private document text', capture_output=True, text=True, env=env, timeout=60)
             self.assertEqual(result.returncode, 1)
-            self.assertIn('use HTTPS or set OLLAMA_ALLOW_REMOTE=1', result.stderr)
+            self.assertIn('set OLLAMA_ALLOW_REMOTE=1', result.stderr)
+
+    def test_ask_local_refuses_remote_https_without_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fakebin = Path(tmp)
+            self._write(fakebin / 'ollama', """#!/bin/sh
+printf 'NAME ID SIZE MODIFIED\\nstub:latest id 1GB today\\n'
+""")
+            env = os.environ.copy()
+            env.update({
+                'PATH': str(fakebin) + os.pathsep + env['PATH'],
+                'OLLAMA_MODEL': 'stub:latest',
+                'OLLAMA_URL': 'https://192.0.2.10:11434',
+                'OLLAMA_ALLOW_REMOTE': '0',
+                # a proxy that cannot be reached: had the request gone out, the message would differ
+                'HTTPS_PROXY': 'http://127.0.0.1:9', 'https_proxy': 'http://127.0.0.1:9',
+            })
+            result = subprocess.run(
+                ['bash', str(ROOT / 'local_pipeline/ask_local.sh'), 'classify'],
+                input='made-up document text', capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('non-local Ollama server would receive the document text', result.stderr)
 
     def test_datecheck_fails_when_http_request_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -330,6 +359,17 @@ printf 'HTTP/1.1 403 Forbidden\r\nDate: Wed, 01 Jan 2031 00:00:00 GMT\r\n\r\n'
         # a single minus attached to the figure is still a sign
         self.assertEqual(scan_intake.amount('new_balance', 'New Balance -1,234.56'), '-1,234.56')
 
+    def test_minus_before_currency_sign_after_other_text_keeps_the_sign(self):
+        # other text between the label and the figure must not swallow a minus attached to the "$"
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance as of 01/15/2030 -$1,234.56'), '-1,234.56')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance (credit) -$50.00'), '-50.00')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance as of 01/15/2030 \u2212$50.00'), '-50.00')
+        # a minus that ends a run of leaders, or one followed by a space, is still not a sign
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance -----$1,234.56'), '1,234.56')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance - $1,234.56'), '1,234.56')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance as of 01/15/2030 - $1,234.56'), '1,234.56')
+        self.assertEqual(scan_intake.amount('new_balance', 'New Balance as of 01/15/2030 $1,234.56'), '1,234.56')
+
     def test_unicode_minus_keeps_the_sign(self):
         minus = '−'
         self.assertEqual(scan_intake.amount('new_balance', 'New Balance ' + minus + '$50.00'), '-50.00')
@@ -432,6 +472,40 @@ printf '<page width="612" height="792"></page>'
                 capture_output=True, text=True, env=env, timeout=60)
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIn('could not be read', result.stderr)
+            self.assertNotIn('Traceback', result.stderr)
+            self.assertIn('##### ' + str(root / 'good.pdf'), result.stdout)
+
+    def test_widget_dump_continues_after_a_page_it_cannot_walk(self):
+        try:
+            from pypdf import PdfWriter
+            from pypdf.generic import ArrayObject, DictionaryObject, NameObject
+        except ImportError:
+            self.skipTest('pypdf is not installed (widget_dump.py needs it)')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            self._write(fakebin / 'pdftotext', """#!/bin/sh
+printf '<page width="612" height="792"></page>'
+""")
+            # a widget annotation without the /Rect every widget must have
+            w = PdfWriter()
+            page = w.add_blank_page(width=612, height=792)
+            page[NameObject('/Annots')] = ArrayObject([DictionaryObject({
+                NameObject('/Type'): NameObject('/Annot'), NameObject('/Subtype'): NameObject('/Widget')})])
+            with open(root / 'broken.pdf', 'wb') as fh:
+                w.write(fh)
+            w = PdfWriter()
+            w.add_blank_page(width=612, height=792)
+            with open(root / 'good.pdf', 'wb') as fh:
+                w.write(fh)
+            env = os.environ.copy()
+            env['PATH'] = str(fakebin) + os.pathsep + env['PATH']
+            result = subprocess.run(
+                [sys.executable, str(ROOT / 'pdf_forms/widget_dump.py'), str(root / 'broken.pdf'), str(root / 'good.pdf')],
+                capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('walking the widgets failed', result.stderr)
             self.assertNotIn('Traceback', result.stderr)
             self.assertIn('##### ' + str(root / 'good.pdf'), result.stdout)
 

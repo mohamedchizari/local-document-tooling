@@ -1,5 +1,5 @@
 #!/bin/bash
-# ask_local.sh - send one narrowed question, with stdin as the text, to a local Ollama model.
+# ask_local.sh - send one narrowed question, with stdin as the text, to an Ollama model on this machine.
 #
 #   usage: bash ask_local.sh 'question'  < input.txt
 #          cat snippets.txt | bash ask_local.sh 'label each line yes/no: ...'
@@ -7,7 +7,7 @@
 #   OLLAMA_MODEL   model tag (default: gemma4:e4b; a name without a tag means <name>:latest)
 #   NUM_CTX        context window in tokens (default: 4096)
 #   OLLAMA_URL     server (default: http://localhost:11434)
-#   OLLAMA_ALLOW_REMOTE=1 allows sending text to a non-loopback HTTP Ollama server (HTTPS needs no opt-in)
+#   OLLAMA_ALLOW_REMOTE=1 allows sending text to a server that is not on this machine (HTTP or HTTPS)
 #
 # Pick a model that fits in memory. A model larger than the machine's RAM pages its weights off
 # disk on every inference and is unusable; as a rule of thumb, keep the model to about half of RAM.
@@ -53,8 +53,8 @@ except ValueError:
     sys.exit("request failed: OLLAMA_URL must be a valid http(s) URL")
 if parsed.scheme not in ("http", "https") or not hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
     sys.exit("request failed: OLLAMA_URL must be an http(s) URL without credentials, query, or fragment")
-if parsed.scheme == "http" and hostname.lower() not in ("localhost", "127.0.0.1", "::1") and e.get("ASK_ALLOW_REMOTE") != "1":
-    sys.exit("request failed: remote HTTP Ollama may expose document text; use HTTPS or set OLLAMA_ALLOW_REMOTE=1 to accept the risk")
+if hostname.lower() not in ("localhost", "127.0.0.1", "::1") and e.get("ASK_ALLOW_REMOTE") != "1":
+    sys.exit("request failed: a non-local Ollama server would receive the document text; set OLLAMA_ALLOW_REMOTE=1 to send it there (prefer HTTPS)")
 text = "" if sys.stdin.isatty() else sys.stdin.read()
 body = json.dumps({"model": e["ASK_MODEL"], "prompt": e["ASK_PROMPT"] + "\n\n" + text, "stream": False,
                    "options": {"num_ctx": int(e["ASK_CTX"])}}).encode()

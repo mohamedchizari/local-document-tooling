@@ -48,8 +48,8 @@ The document and mail tools call no web service. These can reach outside, each b
 command you choose:
 
 - **The local model.** `ask_local.sh` and `local_triage.py` send text to the address in `OLLAMA_URL`,
-  which defaults to this machine. A non-loopback HTTP endpoint is refused unless
-  `OLLAMA_ALLOW_REMOTE=1` is set; HTTPS endpoints are allowed. If you point either tool at another
+  which defaults to this machine. Any endpoint that is not on this machine, HTTP or HTTPS, is refused
+  unless `OLLAMA_ALLOW_REMOTE=1` is set. If you point either tool at another
   host, the text of your documents goes to that host. Use the opt-in only when that transfer is
   intended and the network is trusted.
 - **The backup.** `backup_repo_bundle.sh` copies a bundle of the whole repository history to the

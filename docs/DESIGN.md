@@ -5,8 +5,8 @@ tool, as a scenario with no real data in it, then what the tool checks about its
 its known limits.
 
 "Built-in checks" below means checks the tool runs on every use. The last section says how the tools
-themselves were checked: the PDF text pipeline and the statement amounts by a script, the rest by
-hand.
+themselves were checked: the PDF text pipeline and the statement amounts by a script, the failure
+paths of most other tools by focused regression tests run from the same script, the rest by hand.
 
 ## The idea underneath
 
@@ -98,7 +98,9 @@ the first published version were named without the PDF's own extension (`a_OCR.p
 recognised: a scan whose sidecar holds fewer than 200 bytes of non-blank text is OCR'd once more.
 Run `extract_all.sh` first; with a queue file left by the first version, every file in it is OCR'd
 again. A run that is killed can leave `.part` files under `_DERIVED/`. They are not taken for
-outputs and `pii_sweep.sh` does not read them; the next OCR of the same file replaces them.
+outputs and `pii_sweep.sh` does not read them; the next OCR of the same file replaces them. A killed
+`extract_all.sh` can leave `<sidecar>.part.<process id>` files there too; no later run reuses or
+replaces those, so they stay until they are deleted by hand.
 
 ### `pii_sweep.sh`
 
@@ -266,8 +268,9 @@ issuer, last four or date; those rows need a look.
 
 - An amount is looked for after its label in this order: a signed amount directly after the label
   on the same line; an unsigned figure directly after the label, with only white space or colons
-  between, on the same line or a line below; a signed amount after up to 30 characters of other text
-  on the label's line; the nearest unsigned figure after up to 30 characters of other text on the
+  between, on the same line or a line below; a run of two or more hyphens (leaders) and then an
+  unsigned figure, on the label's line; a signed amount after up to 30 characters of other text on
+  the label's line, keeping a single minus directly before its currency sign; the nearest unsigned figure after up to 30 characters of other text on the
   label's line and any white space after that, line breaks included. An unsigned figure is passed
   over when a slash follows it directly, when a percent sign follows it directly or after one
   white-space character, when a point and a digit follow it (a dotted date), or when a point or a
@@ -301,8 +304,9 @@ one entry.
 
 **What it does.** Walks the widgets on each page and prints one row per widget: field name, position,
 the printed label to its left, the text above it, the value and, for buttons, the appearance state.
-It checks nothing; it prints what is there. A file that pdftotext cannot read is skipped with a
-warning, the remaining files are still listed, and the exit status is 1.
+It checks nothing; it prints what is there. A file that pypdf cannot open or walk, or that pdftotext
+cannot read, is skipped with a warning (rows already printed for it stay), the remaining files are
+still listed, and the exit status is 1.
 
 **Limit.** The label and the text above a widget are found by position on the page. They are a guide
 to which box is which, and can be wrong on a dense form.
@@ -456,7 +460,7 @@ writes one byte per page. An amount printed without a currency sign was indexed 
 and the cents. Both are fixed, and the check script holds a case for each. The reliability regressions
 also cover negative balances, hyphen separators, dash leaders and the Unicode minus, extraction/OCR
 failures, a listing of thousands of images, an OCR'd file whose image check fails, a queue rewrite
-that fails part way, duplicate comparisons, remote cleartext model URLs, datecheck failures and error
+that fails part way, duplicate comparisons, model URLs off this machine, datecheck failures and error
 responses, form-dump failures (files that pdftotext or pypdf cannot read), worktree backups and
 refused subfolders, and OCR coverage counters.
 

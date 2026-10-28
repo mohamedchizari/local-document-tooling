@@ -16,7 +16,8 @@ Rules built in:
 
 Usage: python3 local_triage.py <directory> [--model qwen3:8b] [--limit 200] [--out index.tsv]
   --limit is the number of new files to index in this run.
-Environment: OLLAMA_URL (default http://localhost:11434); remote HTTP requires OLLAMA_ALLOW_REMOTE=1.
+Environment: OLLAMA_URL (default http://localhost:11434); a server that is not on this machine, over
+HTTP or HTTPS, requires OLLAMA_ALLOW_REMOTE=1.
 TRIAGE_CONFIG selects another config file.
 Needs: a pulled Ollama model and config.local.json beside this script (copy config.example.json).
 """
@@ -55,9 +56,10 @@ def validate_ollama_url(url):
             or parsed.query or parsed.fragment:
         sys.exit('OLLAMA_URL must be an http(s) URL without embedded credentials')
     local_hosts = ('localhost', '127.0.0.1', '::1')
-    if parsed.scheme == 'http' and hostname.lower() not in local_hosts \
-            and os.environ.get('OLLAMA_ALLOW_REMOTE') != '1':
-        sys.exit('remote HTTP Ollama may expose document text; use HTTPS or set OLLAMA_ALLOW_REMOTE=1 to accept the risk')
+    # Any server that is not on this machine receives the document text, over HTTPS as over HTTP.
+    if hostname.lower() not in local_hosts and os.environ.get('OLLAMA_ALLOW_REMOTE') != '1':
+        sys.exit('a non-local Ollama server would receive the document text; '
+                 'set OLLAMA_ALLOW_REMOTE=1 to send it there (prefer HTTPS)')
     return url.rstrip('/')
 
 

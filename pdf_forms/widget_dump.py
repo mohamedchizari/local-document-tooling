@@ -7,9 +7,9 @@ two rows, each with its own state.
 
 Usage: python3 widget_dump.py form.pdf [more.pdf ...]
        WIDGET_VALUE_CONTAINS=<text> python3 widget_dump.py form.pdf     (only widgets whose value contains the text)
-Needs: pypdf, and pdftotext (poppler) on PATH for the labels. A file that pypdf or pdftotext cannot
-read is skipped with a warning; the others are still listed, and the exit status is 1 if any file was
-skipped.
+Needs: pypdf, and pdftotext (poppler) on PATH for the labels. A file that pypdf cannot open or walk,
+or that pdftotext cannot read, is skipped with a warning (rows already printed for it stay); the
+others are still listed, and the exit status is 1 if any file was skipped.
 """
 import html
 import os
@@ -51,6 +51,16 @@ def dump(path):
     xml = result.stdout
     pages = xml.split('<page ')[1:]
     print('#####', path, n_pages, 'pp')
+    try:
+        walk(reader, pages)
+    except Exception as exc:  # a damaged page or annotation: say so and go on with the next file
+        print(f"WARNING: {path}: walking the widgets failed ({type(exc).__name__}: {exc}); "
+              f"the rest of this file is skipped", file=sys.stderr)
+        return False
+    return True
+
+
+def walk(reader, pages):
     for pi, page in enumerate(reader.pages, 1):
         pg = pages[pi - 1] if pi <= len(pages) else ''
         hm = re.search(r'height="([\d.]+)"', pg)
@@ -70,7 +80,6 @@ def dump(path):
             above = ' '.join(w for (wy, wx, w) in by_x if 8 <= (cy - (wy + 4)) < 20 and x0 - 20 < wx < x1)
             state = f" | AS: {a['/AS']}" if '/AS' in a else ''
             print(f"p{pi} [{inherited(a, '/T')}] {round(x0)},{round(y0)} w{round(x1 - x0)} | L: {label[-55:]} | A: {above[:45]} | V: {v[:60]}{state}")
-    return True
 
 
 if __name__ == '__main__':

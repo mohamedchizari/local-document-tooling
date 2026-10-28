@@ -180,6 +180,8 @@ cases = [
  ('new_balance', 'New Balance -$50.00', '-50.00'),
  ('new_balance', 'New Balance -----1,234.56', '1,234.56'),
  ('new_balance', 'New Balance \u2212$50.00', '-50.00'),
+ ('new_balance', 'New Balance as of 01/15/2030 -$1,234.56', '-1,234.56'),
+ ('new_balance', 'New Balance -----$1,234.56', '1,234.56'),
  ('new_balance', 'New Balance' + ' ' * 40 + '1,234.56', '1,234.56'),
  ('new_balance', 'New Balance   Minimum Payment Due\n1,234.56   25.00', '1,234.56'),
  ('min_due', 'New Balance   Minimum Payment Due\n1,234.56   25.00', '1,234.56'),

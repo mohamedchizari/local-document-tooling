@@ -59,7 +59,8 @@ RX = {
 }
 
 # Amounts. A signed amount is a currency sign, then digits and commas, a point and two digits; a minus
-# directly in front of the currency sign makes it negative. An unsigned amount is negative only when a
+# directly in front of the currency sign makes it negative, also when other text sits between the
+# label and the minus ("New Balance as of 01/15/2030 -$1,234.56" reads -1,234.56). An unsigned amount is negative only when a
 # minus is attached to its first digit: "New Balance - 50.00" reads the hyphen as a separator (50.00).
 # A minus is the hyphen-minus or the Unicode minus sign (U+2212); the amount returned always uses the
 # hyphen-minus. Two or more hyphens before a figure are leaders, not a sign: "New Balance -----1,234.56"
@@ -72,6 +73,9 @@ RX = {
 MINUS = '-\u2212'      # first in any character class, so the hyphen is never read as a range
 SIGNED = r'([' + MINUS + r']?\$\s*\d[\d,]*\.\d{2})(?!\d)'
 UNSIGNED = r'(?<![' + MINUS + r'\d.,/])([' + MINUS + r']?\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
+# after other text: a minus counts only when it stands alone, so the last hyphen of a run of
+# leaders ("New Balance -----$1,234.56") is not taken for a sign
+SIGNED_AFTER_TEXT = r'((?:(?<![' + MINUS + r'])[' + MINUS + r'])?\$\s*\d[\d,]*\.\d{2})(?!\d)'
 # after leaders: no sign of its own, and the same guard after the figure
 AFTER_LEADERS = r'-{2,}[ \t]*(\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
 LABEL = {
@@ -83,7 +87,9 @@ LABEL = {
 #   2. an unsigned amount directly after it, with only white space or colons between, on the same
 #      line or a line below
 #   2a. a run of two or more hyphens (leaders) and then an unsigned figure, on the label's line
-#   3. a signed amount after up to 30 characters of other text on the label's line
+#   3. a signed amount after up to 30 characters of other text on the label's line; a single minus
+#      directly in front of its currency sign is kept (the filler is lazy, so it stops before that
+#      minus instead of eating it; it cannot pass a currency sign, so it reaches the same amount)
 #   4. the nearest unsigned amount after up to 30 characters of other text on the label's line and
 #      any white space after that, line breaks included
 #      (the filler is lazy: a greedy one eats all but the last digit before the point)
@@ -91,7 +97,7 @@ AFTER_LABEL = [re.compile(x) for x in (
     r'[ \t:]*' + SIGNED,
     r'[\s:]*' + UNSIGNED,
     r'[ \t:]*' + AFTER_LEADERS,
-    r'[^\n$]{0,30}' + SIGNED,
+    r'[^\n$]{0,30}?' + SIGNED_AFTER_TEXT,
     r'[^\n$]{0,30}?\s*' + UNSIGNED,
 )]
 

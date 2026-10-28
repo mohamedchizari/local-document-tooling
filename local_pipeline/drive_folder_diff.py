@@ -19,7 +19,6 @@ Writes drive_only.tsv, folder_only.tsv, same.tsv, differ.tsv and SUMMARY.md into
 Read-only on both trees.
 """
 import argparse
-import collections
 import datetime
 import hashlib
 import os
@@ -85,10 +84,10 @@ def main():
     same, differ = [], []
     for k in sorted(set(D) & set(F)):
         if a.hash_files:
-            hd = collections.Counter(sha256(os.path.join(a.drive, p)) for p in D[k])
-            hf = collections.Counter(sha256(os.path.join(a.folder, p)) for p in F[k])
+            hd = {sha256(os.path.join(a.drive, p)) for p in D[k]}
+            hf = {sha256(os.path.join(a.folder, p)) for p in F[k]}
             # same = both sides hold the same contents; extra identical copies on one side do not matter
-            (same if set(hd) == set(hf) else differ).append(k)
+            (same if hd == hf else differ).append(k)
         else:
             same.append(k)
 

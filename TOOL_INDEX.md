@@ -2,14 +2,14 @@
 
 | tool | what it does |
 |---|---|
-| `local_pipeline/extract_all.sh` | writes a text sidecar for every PDF under a folder; resumable; rebuilds a NUL-delimited image-only queue and exits nonzero on extraction or image-check failures |
+| `local_pipeline/extract_all.sh` | writes a text sidecar for every PDF under a folder; resumable; rebuilds a NUL-delimited image-only queue and exits nonzero on extraction or image-check failures (an image-check failure on a PDF already OCR'd is logged, not counted) |
 | `local_pipeline/ocr_queue.sh` | OCRs the image-only PDFs that `extract_all.sh` listed; never changes an original; exits with status 1 if a file failed |
 | `local_pipeline/env.sh` | sourced by the two scripts above: adds `PDFTOOLS_BIN` to PATH and moves `TMPDIR` under the home folder |
 | `local_pipeline/pii_sweep.sh` | finds hyphenated 3-2-4 IDs and 13 to 19 digit runs (card checksum tested) in the text sidecars; starts with a canary self-test and handles newline filenames |
 | `local_pipeline/mail_extract.sh` | lists the Apple Mail messages whose raw `.emlx` file contains a term (case-insensitive; encoded bodies are not searched); counts header-only files separately and reads file paths NUL-delimited, so names with line breaks work |
 | `local_pipeline/scam_sweep.py` | scores received mail for phishing signals from the Mail index, then checks Reply-To and SPF/DKIM/DMARC on the top hits |
-| `local_pipeline/local_triage.py` | an Ollama model writes one pointer card per text file; refuses to run unless a canary call succeeds; a remote endpoint over plain HTTP needs an explicit opt-in |
-| `local_pipeline/ask_local.sh` | sends one narrowed question, with stdin as the text, to Ollama; remote cleartext HTTP requires explicit opt-in |
+| `local_pipeline/local_triage.py` | an Ollama model writes one pointer card per text file; refuses to run unless a canary call succeeds; any endpoint not on this machine needs an explicit opt-in |
+| `local_pipeline/ask_local.sh` | sends one narrowed question, with stdin as the text, to Ollama; any endpoint not on this machine requires an explicit opt-in |
 | `local_pipeline/config.example.json` | example config for `local_triage.py` |
 | `local_pipeline/drive_folder_diff.py` | lists files that are only in a synced folder, only in a local folder, or in both, by file name and size, optionally SHA-256 |
 | `local_pipeline/app_census.py` | Markdown list of installed Mac apps with architecture, from `system_profiler` JSON |
