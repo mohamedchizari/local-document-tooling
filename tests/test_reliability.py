@@ -210,6 +210,53 @@ printf 'NAME ID SIZE MODIFIED\\nstub:latest id 1GB today\\n'
             self.assertEqual(result.returncode, 1)
             self.assertIn('non-local Ollama server would receive the document text', result.stderr)
 
+    def test_local_triage_reaches_a_local_server_without_the_proxy(self):
+        with self._fake_servers() as (server, proxy):
+            script = (
+                'import sys; sys.path.insert(0, sys.argv[1])\n'
+                'from local_pipeline import local_triage as t\n'
+                't.OLLAMA = t.validate_ollama_url(sys.argv[2])\n'
+                'print(t.ollama("stub:latest", "made-up prompt", timeout=20))\n'
+                'print(t.models_present())\n')
+            local = subprocess.run(
+                [sys.executable, '-c', script, str(ROOT), 'http://127.0.0.1:%d' % server.port],
+                capture_output=True, text=True, env=self._proxy_env(proxy.port), timeout=60)
+            self.assertEqual(local.returncode, 0, local.stderr)
+            self.assertIn('answer from the local server', local.stdout)
+            self.assertEqual(len(server.seen), 2)
+            self.assertEqual(proxy.seen, [], 'a request to this machine went through the proxy')
+            # a remote server, opted in, is reached as urllib normally would: through the proxy
+            remote = subprocess.run(
+                [sys.executable, '-c', script, str(ROOT), 'http://192.0.2.10:11434'],
+                capture_output=True, text=True, env=self._proxy_env(proxy.port, OLLAMA_ALLOW_REMOTE='1'),
+                timeout=60)
+            self.assertEqual(remote.returncode, 0, remote.stderr)
+            self.assertIn('answer through the proxy', remote.stdout)
+            self.assertTrue(any('192.0.2.10' in line for line in proxy.seen))
+            self.assertEqual(len(server.seen), 2)
+
+    def test_ask_local_reaches_a_local_server_without_the_proxy(self):
+        with tempfile.TemporaryDirectory() as tmp, self._fake_servers() as (server, proxy):
+            fakebin = Path(tmp)
+            self._write(fakebin / 'ollama', """#!/bin/sh
+printf 'NAME ID SIZE MODIFIED\\nstub:latest id 1GB today\\n'
+""")
+            def ask(url, **extra):
+                env = self._proxy_env(proxy.port, OLLAMA_MODEL='stub:latest', OLLAMA_URL=url, **extra)
+                env['PATH'] = str(fakebin) + os.pathsep + env['PATH']
+                return subprocess.run(
+                    ['bash', str(ROOT / 'local_pipeline/ask_local.sh'), 'classify'],
+                    input='made-up document text', capture_output=True, text=True, env=env, timeout=60)
+            local = ask('http://127.0.0.1:%d' % server.port)
+            self.assertEqual(local.returncode, 0, local.stderr)
+            self.assertIn('answer from the local server', local.stdout)
+            self.assertEqual(len(server.seen), 1)
+            self.assertEqual(proxy.seen, [], 'a request to this machine went through the proxy')
+            remote = ask('http://192.0.2.10:11434', OLLAMA_ALLOW_REMOTE='1')
+            self.assertEqual(remote.returncode, 0, remote.stderr)
+            self.assertIn('answer through the proxy', remote.stdout)
+            self.assertTrue(any('192.0.2.10' in line for line in proxy.seen))
+
     def test_datecheck_fails_when_http_request_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             fakebin = Path(tmp)
@@ -562,6 +609,59 @@ printf 'ocr pdf' > "$last"
             ['bash', str(ROOT / 'local_pipeline/extract_all.sh'), str(archive)],
             capture_output=True, text=True,
             env=self._env(fakebin, root, **extra))
+
+    @staticmethod
+    def _proxy_env(proxy_port, **extra):
+        """Every proxy variable points at the fake proxy, and nothing is exempted from it."""
+        env = os.environ.copy()
+        for name in ('no_proxy', 'NO_PROXY'):
+            env.pop(name, None)
+        url = 'http://127.0.0.1:%d' % proxy_port
+        for name in ('http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'):
+            env[name] = url
+        env.update(extra)
+        return env
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _fake_servers():
+        """A made-up Ollama server and a made-up HTTP proxy on this machine; each records what reached it."""
+        import http.server
+        import json
+        import threading
+
+        def start(answer):
+            seen = []
+
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def _reply(self):
+                    length = int(self.headers.get('Content-Length') or 0)
+                    if length:
+                        self.rfile.read(length)
+                    seen.append('%s %s' % (self.command, self.path))
+                    body = json.dumps({'response': answer, 'models': [{'name': 'stub:latest'}]}).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                do_GET = do_POST = _reply
+
+                def log_message(self, *args):
+                    pass
+
+            httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            return httpd, types.SimpleNamespace(port=httpd.server_address[1], seen=seen)
+
+        server_httpd, server = start('answer from the local server')
+        proxy_httpd, proxy = start('answer through the proxy')
+        try:
+            yield server, proxy
+        finally:
+            for httpd in (server_httpd, proxy_httpd):
+                httpd.shutdown()
+                httpd.server_close()
 
     @staticmethod
     def _git(cwd, *args):

@@ -8,6 +8,7 @@
 #   NUM_CTX        context window in tokens (default: 4096)
 #   OLLAMA_URL     server (default: http://localhost:11434)
 #   OLLAMA_ALLOW_REMOTE=1 allows sending text to a server that is not on this machine (HTTP or HTTPS)
+#   A request to this machine never goes through a proxy; a remote one follows the usual proxy variables.
 #
 # Pick a model that fits in memory. A model larger than the machine's RAM pages its weights off
 # disk on every inference and is unusable; as a rule of thumb, keep the model to about half of RAM.
@@ -53,14 +54,17 @@ except ValueError:
     sys.exit("request failed: OLLAMA_URL must be a valid http(s) URL")
 if parsed.scheme not in ("http", "https") or not hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
     sys.exit("request failed: OLLAMA_URL must be an http(s) URL without credentials, query, or fragment")
-if hostname.lower() not in ("localhost", "127.0.0.1", "::1") and e.get("ASK_ALLOW_REMOTE") != "1":
+local = hostname.lower() in ("localhost", "127.0.0.1", "::1")
+if not local and e.get("ASK_ALLOW_REMOTE") != "1":
     sys.exit("request failed: a non-local Ollama server would receive the document text; set OLLAMA_ALLOW_REMOTE=1 to send it there (prefer HTTPS)")
 text = "" if sys.stdin.isatty() else sys.stdin.read()
 body = json.dumps({"model": e["ASK_MODEL"], "prompt": e["ASK_PROMPT"] + "\n\n" + text, "stream": False,
                    "options": {"num_ctx": int(e["ASK_CTX"])}}).encode()
 req = urllib.request.Request(e["ASK_URL"].rstrip("/") + "/api/generate", data=body, headers={"Content-Type": "application/json"})
 try:
-    with urllib.request.urlopen(req, timeout=600) as r:
+    # a request to this machine never goes through a proxy, whatever the proxy variables say
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if local else urllib.request.build_opener()
+    with opener.open(req, timeout=600) as r:
         print(json.loads(r.read())["response"])
 except Exception as err:
     sys.exit("request failed: %s" % err)

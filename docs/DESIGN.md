@@ -6,7 +6,7 @@ its known limits.
 
 "Built-in checks" below means checks the tool runs on every use. The last section says how the tools
 themselves were checked: the PDF text pipeline and the statement amounts by a script, the failure
-paths of most other tools by focused regression tests run from the same script, the rest by hand.
+paths of several other tools by focused regression tests run from the same script, the rest by hand.
 
 ## The idea underneath
 
@@ -215,6 +215,14 @@ has to be opened.
 **Limit.** The model check asks the local `ollama` command. With `OLLAMA_URL` pointed at another
 server, the check and the request go to different servers.
 
+**Proxies (both tools).** A request to this machine (`localhost`, `127.0.0.1`, `::1`) is sent with
+no proxy at all, whatever the proxy variables say; without that, `http_proxy` with no `no_proxy`
+would have carried the text of a local request to the proxy. A remote server, allowed by
+`OLLAMA_ALLOW_REMOTE=1`, is reached through the proxy named by `http_proxy` or `https_proxy`;
+Python's urllib does not use `all_proxy`, and on macOS with neither set it may use the proxy in
+System Settings (read from the CPython source, not run on a Mac). Both are tested with a
+made-up server and a made-up proxy on loopback; IPv6 `::1` is not.
+
 ## Folders and machine (`local_pipeline/`)
 
 ### `drive_folder_diff.py`
@@ -268,8 +276,8 @@ issuer, last four or date; those rows need a look.
 
 - An amount is looked for after its label in this order: a signed amount directly after the label
   on the same line; an unsigned figure directly after the label, with only white space or colons
-  between, on the same line or a line below; a run of two or more hyphens (leaders) and then an
-  unsigned figure, on the label's line; a signed amount after up to 30 characters of other text on
+  between, on the same line or a line below; directly after the label, a run of two or more hyphens
+  (leaders) and then an unsigned figure, on the label's line; a signed amount after up to 30 characters of other text on
   the label's line, keeping a single minus directly before its currency sign; the nearest unsigned figure after up to 30 characters of other text on the
   label's line and any white space after that, line breaks included. An unsigned figure is passed
   over when a slash follows it directly, when a percent sign follows it directly or after one

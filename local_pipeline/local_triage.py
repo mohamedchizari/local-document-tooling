@@ -17,7 +17,8 @@ Rules built in:
 Usage: python3 local_triage.py <directory> [--model qwen3:8b] [--limit 200] [--out index.tsv]
   --limit is the number of new files to index in this run.
 Environment: OLLAMA_URL (default http://localhost:11434); a server that is not on this machine, over
-HTTP or HTTPS, requires OLLAMA_ALLOW_REMOTE=1.
+HTTP or HTTPS, requires OLLAMA_ALLOW_REMOTE=1. A request to this machine never goes through a proxy;
+a remote one follows the usual proxy variables.
 TRIAGE_CONFIG selects another config file.
 Needs: a pulled Ollama model and config.local.json beside this script (copy config.example.json).
 """
@@ -46,6 +47,23 @@ BAD_CARD = {'answers': '', 'entities': [], 'dates': [], 'kind': 'other', 'needs_
 FAILED = ('ERROR ', 'UNPARSEABLE MODEL OUTPUT')   # rows that start like this are retried on resume
 
 
+LOCAL_HOSTS = ('localhost', '127.0.0.1', '::1')
+
+
+def is_local(url):
+    return (urlsplit(url).hostname or '').lower() in LOCAL_HOSTS
+
+
+def open_url(target, timeout):
+    """Open a URL or Request. A request to this machine never goes through a proxy, whatever
+    http_proxy, https_proxy, all_proxy or no_proxy say; a remote server (OLLAMA_ALLOW_REMOTE=1)
+    is reached as urllib normally would, proxies included."""
+    url = target.full_url if isinstance(target, urllib.request.Request) else target
+    if is_local(url):
+        return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(target, timeout=timeout)
+    return urllib.request.urlopen(target, timeout=timeout)
+
+
 def validate_ollama_url(url):
     try:
         parsed = urlsplit(url)
@@ -55,9 +73,8 @@ def validate_ollama_url(url):
     if parsed.scheme not in ('http', 'https') or not hostname or parsed.username or parsed.password \
             or parsed.query or parsed.fragment:
         sys.exit('OLLAMA_URL must be an http(s) URL without embedded credentials')
-    local_hosts = ('localhost', '127.0.0.1', '::1')
     # Any server that is not on this machine receives the document text, over HTTPS as over HTTP.
-    if hostname.lower() not in local_hosts and os.environ.get('OLLAMA_ALLOW_REMOTE') != '1':
+    if hostname.lower() not in LOCAL_HOSTS and os.environ.get('OLLAMA_ALLOW_REMOTE') != '1':
         sys.exit('a non-local Ollama server would receive the document text; '
                  'set OLLAMA_ALLOW_REMOTE=1 to send it there (prefer HTTPS)')
     return url.rstrip('/')
@@ -81,13 +98,13 @@ def ollama(model, prompt, timeout=180):
     body = json.dumps({'model': model, 'prompt': prompt, 'format': 'json', 'stream': False,
                        'options': {'temperature': 0, 'num_ctx': 8192}}).encode()
     req = urllib.request.Request(f'{OLLAMA}/api/generate', data=body, headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with open_url(req, timeout) as r:
         return json.loads(r.read())['response']
 
 
 def models_present():
     try:
-        with urllib.request.urlopen(f'{OLLAMA}/api/tags', timeout=10) as r:
+        with open_url(f'{OLLAMA}/api/tags', 10) as r:
             return [m['name'] for m in json.loads(r.read()).get('models', [])]
     except Exception as e:
         sys.exit(f'Ollama not reachable at {OLLAMA}: {e}')
@@ -127,7 +144,7 @@ def wait_for_model_slot(model, max_wait=1800):
     t0 = time.time()
     while time.time() - t0 < max_wait:
         try:
-            with urllib.request.urlopen(f'{OLLAMA}/api/ps', timeout=10) as r:
+            with open_url(f'{OLLAMA}/api/ps', 10) as r:
                 loaded = [m['name'] for m in json.load(r).get('models', [])]
         except Exception:
             loaded = []

@@ -49,9 +49,11 @@ command you choose:
 
 - **The local model.** `ask_local.sh` and `local_triage.py` send text to the address in `OLLAMA_URL`,
   which defaults to this machine. Any endpoint that is not on this machine, HTTP or HTTPS, is refused
-  unless `OLLAMA_ALLOW_REMOTE=1` is set. If you point either tool at another
-  host, the text of your documents goes to that host. Use the opt-in only when that transfer is
-  intended and the network is trusted.
+  unless `OLLAMA_ALLOW_REMOTE=1` is set. A request to this machine never goes through a proxy,
+  whatever the proxy variables or the system's proxy settings say. If you point either tool at
+  another host, the text of your documents goes to that host, and through the proxy named by
+  `http_proxy` or `https_proxy` if one is set (`all_proxy` is not used; on macOS with neither set,
+  Python may use the proxy in System Settings). Use the opt-in only when that transfer is intended and the network is trusted.
 - **The backup.** `backup_repo_bundle.sh` copies a bundle of the whole repository history to the
   folder in `BACKUP_DEST`. If a sync client uploads that folder, the bundle leaves the machine.
 - **The clock check.** `datecheck.sh` requests the headers of the websites you name, or of four
