@@ -24,8 +24,9 @@ Fixes and small additions are welcome. A change has to keep these true:
 7. **Shell scripts run on bash 3.2**, the version macOS ships: no `mapfile`, no associative arrays.
 
 `bash tests/run_checks.sh` checks the PDF text pipeline and the amount patterns of `scan_intake.py`
-against fixtures it generates; run it when you touch those, and add a case for what you changed. The
-other tools have no automated check. In a pull request, say what you ran the change against and what
-came out, using made-up input only. `docs/DESIGN.md` lists what each tool checks about itself.
+against generated fixtures and runs focused reliability regression tests; run it when you touch
+those, and add a case for what you changed. The other tools have selected regression coverage, but
+many behaviors remain manually checked. In a pull request, say what you ran the change against and
+what came out, using made-up input only. `docs/DESIGN.md` lists what each tool checks about itself.
 
 By contributing you agree that your contribution is released under the MIT license in `LICENSE`.

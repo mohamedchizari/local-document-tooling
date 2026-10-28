@@ -53,8 +53,14 @@ fi
 
 # ---- 2: the files --------------------------------------------------------
 echo "" >> "$REPORT"; echo "## 2. .emlx files on disk" >> "$REPORT"
-TOTAL=$(find "$MAILROOT" -name '*.emlx' 2>/dev/null | wc -l | tr -d ' ')
-PARTIAL=$(find "$MAILROOT" -name '*.partial.emlx' 2>/dev/null | wc -l | tr -d ' ')
+count_files() {
+  local pattern="$1" n=0
+  while IFS= read -r -d '' _mail_file; do n=$((n+1)); done \
+    < <(find "$MAILROOT" -type f -name "$pattern" -print0 2>/dev/null)
+  echo "$n"
+}
+TOTAL=$(count_files '*.emlx')
+PARTIAL=$(count_files '*.partial.emlx')
 echo "- store: **$TOTAL** .emlx, of which **$PARTIAL** are \`.partial\` (headers only)" >> "$REPORT"
 
 # the store must be non-empty, or this sweep is broken rather than clean
@@ -66,7 +72,8 @@ echo "" >> "$REPORT"
 echo "| date | from/to | subject | attachments | complete? |" >> "$REPORT"
 echo "|---|---|---|---|---|" >> "$REPORT"
 
-grep -rliF --include='*.emlx' -e "$SEARCH" "$MAILROOT" 2>/dev/null | while IFS= read -r m; do
+while IFS= read -r -d '' m; do
+  if grep -qiF -e "$SEARCH" "$m" 2>/dev/null; then
   python3 - "$m" <<'PY' >> "$REPORT"
 import email
 import email.header
@@ -99,9 +106,11 @@ try:
     comp = 'partial' if p.endswith('.partial.emlx') else 'full'
     print(f"| {text(msg.get('Date') or '?', 31)} | {text(who, 58)} | {text(msg.get('Subject'), 58)} | {', '.join(att) or '-'} | {comp} |")
 except Exception:
-    print(f"| ? | ? | PARSE FAIL {os.path.basename(p)} | - | - |")
+    name = os.path.basename(p).replace('|', '/').replace('\r', ' ').replace('\n', ' ')
+    print(f"| ? | ? | PARSE FAIL {name} | - | - |")
 PY
-done
+  fi
+done < <(find "$MAILROOT" -type f -name '*.emlx' -print0 2>/dev/null)
 
 echo "" >> "$REPORT"
 echo "**What this did not search:** encoded message bodies (base64, quoted-printable), attachments," >> "$REPORT"

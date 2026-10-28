@@ -7,7 +7,8 @@ two rows, each with its own state.
 
 Usage: python3 widget_dump.py form.pdf [more.pdf ...]
        WIDGET_VALUE_CONTAINS=<text> python3 widget_dump.py form.pdf     (only widgets whose value contains the text)
-Needs: pypdf, and pdftotext (poppler) on PATH for the labels.
+Needs: pypdf, and pdftotext (poppler) on PATH for the labels. A file pdftotext cannot read is skipped
+with a warning; the others are still listed, and the exit status is 1 if any file was skipped.
 """
 import html
 import os
@@ -35,7 +36,12 @@ def inherited(widget, key, default=None):
 
 def dump(path):
     reader = PdfReader(path)
-    xml = subprocess.run(['pdftotext', '-bbox', path, '-'], capture_output=True, text=True).stdout
+    result = subprocess.run(['pdftotext', '-bbox', path, '-'], capture_output=True, text=True)
+    if result.returncode:
+        detail = result.stderr.strip() or f'exit status {result.returncode}'
+        print(f"WARNING: pdftotext failed for {path}: {detail}; skipped", file=sys.stderr)
+        return False
+    xml = result.stdout
     pages = xml.split('<page ')[1:]
     print('#####', path, len(reader.pages), 'pp')
     for pi, page in enumerate(reader.pages, 1):
@@ -57,10 +63,12 @@ def dump(path):
             above = ' '.join(w for (wy, wx, w) in by_x if 8 <= (cy - (wy + 4)) < 20 and x0 - 20 < wx < x1)
             state = f" | AS: {a['/AS']}" if '/AS' in a else ''
             print(f"p{pi} [{inherited(a, '/T')}] {round(x0)},{round(y0)} w{round(x1 - x0)} | L: {label[-55:]} | A: {above[:45]} | V: {v[:60]}{state}")
+    return True
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    for f in sys.argv[1:]:
-        dump(f)
+    ok = [dump(f) for f in sys.argv[1:]]
+    # every file is tried; the exit status says whether any was skipped
+    sys.exit(0 if all(ok) else 1)

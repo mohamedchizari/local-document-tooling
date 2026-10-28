@@ -90,15 +90,16 @@ echo "canary fired ($CH hits)"
 echo "=== sweeping ===" | tee "$OUT"
 echo "date_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
 n_files=0; n_dirty=0
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   n_files=$((n_files+1))
   hits=$(scan "$f")
   if [ -n "$hits" ]; then
     n_dirty=$((n_dirty+1))
     src="${f#$DERIVED/}"; src="${src%.txt}"
+    src="${src//$'\n'/\\n}"; src="${src//$'\r'/\\r}"
     { echo "--- $src"; echo "$hits" | sort -u | sed 's/^/    /'; } >> "$OUT"
   fi
-done < <(find "$DERIVED" -name '*.txt' -type f 2>/dev/null)
+done < <(find "$DERIVED" -name '*.txt' -type f -print0 2>/dev/null)
 
 echo "scanned $n_files sidecars, $n_dirty carry ID-shaped or card-shaped digits" | tee -a "$OUT"
 echo

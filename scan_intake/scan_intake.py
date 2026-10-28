@@ -11,8 +11,8 @@ Three steps, each re-runnable, none calls a language model:
 
   ocr      IN.pdf [IN2.pdf ...]
       Runs `ocrmypdf --skip-text` (writes IN.ocr.pdf) and a text sidecar IN.txt with one
-      form-feed per page. Needs ocrmypdf on PATH. These two files hold the full text of the
-      statements, account numbers included: keep them with the scans.
+      form-feed per page. Returns nonzero if any input fails. Needs ocrmypdf on PATH. These two
+      files hold the full text of the statements, account numbers included: keep them with the scans.
 
   index    DIR  OUT.csv  [--issuers issuers.txt]
       Reads every *.txt sidecar in DIR, finds statement first-pages, and writes one CSV row per
@@ -26,6 +26,7 @@ Needs: pypdf for collate, ocrmypdf for ocr.
 """
 import sys, os, re, csv, subprocess, collections
 
+
 def collate(fronts, backs, out, backs_forward=False):
     from pypdf import PdfReader, PdfWriter
     f, b = PdfReader(fronts).pages, list(PdfReader(backs).pages)
@@ -38,10 +39,13 @@ def collate(fronts, backs, out, backs_forward=False):
     print(f'{out}: {2*len(f)} pages ({len(f)} sheets), backs {"forward" if backs_forward else "reversed"}')
 
 def ocr(paths):
+    failed = 0
     for p in paths:
         base = os.path.splitext(p)[0]
         r = subprocess.run(['ocrmypdf', '--skip-text', '--sidecar', base + '.txt', '-q', p, base + '.ocr.pdf'])
         print(p, 'ocr exit', r.returncode)
+        failed += r.returncode != 0
+    return 1 if failed else 0
 
 MONTHS = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec'
 DATE = r'(?:\d{1,2}/\d{1,2}/\d{2,4}|(?:' + MONTHS + r')[a-z]*\.? \d{1,2},? \d{4})'
@@ -52,13 +56,15 @@ RX = {
  'balance_line': re.compile(r'New Balance[^\n$]{0,30}\$?\s*[\d,]+\.\d{2}', re.I),
 }
 
-# Amounts. A signed amount is a currency sign, then digits and commas, a point and two digits.
+# Amounts. A signed amount is a currency sign, then digits and commas, a point and two digits; a minus
+# directly in front of the currency sign makes it negative. An unsigned amount is negative only when a
+# minus is attached to its first digit: "New Balance - 50.00" reads the hyphen as a separator (50.00).
 # An unsigned one has no sign to mark it, so it is guarded: it may not start inside another number
 # or directly after a point or a slash, and it may not be followed by a digit, a slash, a percent sign
 # (directly or after one white-space character) or a point and a digit. A rate ("21.99%") or a dotted date ("15.01.2030") is
 # then not taken for an amount. A date written "15.01." with nothing after the last point still is.
-SIGNED = r'\$\s*(\d[\d,]*\.\d{2})(?!\d)'
-UNSIGNED = r'(?<![\d.,/])(\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
+SIGNED = r'(-?\$\s*\d[\d,]*\.\d{2})(?!\d)'
+UNSIGNED = r'(?<![\d.,/-])(-?\d[\d,]*\.\d{2})(?![\d/]|\s?%|\.\d)'
 LABEL = {
  'new_balance': re.compile(r'New Balance', re.I),
  'min_due': re.compile(r'Minimum (?:Payment )?Due', re.I),
@@ -85,7 +91,7 @@ def amount(key, t):
         for rx in AFTER_LABEL:
             a = rx.match(t, m.end())
             if a:
-                return a.group(1)
+                return ''.join(a.group(1).replace('$', '').split())
     return ''
 
 
@@ -155,7 +161,7 @@ if __name__ == '__main__':
     if cmd == 'collate' and len(pos) == 4 and set(flags) <= {'--backs-forward'}:
         collate(pos[1], pos[2], pos[3], '--backs-forward' in flags)
     elif cmd == 'ocr' and len(pos) >= 2 and not flags:
-        ocr(pos[1:])
+        sys.exit(ocr(pos[1:]))
     elif cmd == 'index' and len(pos) == 3 and not flags:
         index(pos[1], pos[2])
     elif cmd == 'index' and len(pos) == 4 and flags == ['--issuers'] and args.index('--issuers') == len(args) - 2:

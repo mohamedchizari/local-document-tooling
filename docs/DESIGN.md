@@ -46,7 +46,11 @@ the extractor writes one byte per page even for an empty page, so the sidecar of
 hundreds of bytes with nothing in them. Skips a PDF whose sidecar is newer than the PDF, and rebuilds the
 image-only list on every run, so that a scan stays listed until it has been OCR'd. When the sidecar
 of a PDF that was already OCR'd has to be written again, it is written from the OCR copy, which has
-the text.
+the text. A failed extraction writes only to a temporary sidecar and cannot leave a newer partial
+file that a later run mistakes for complete. `pdfimages` must be available; if its check fails on a
+short-text PDF, that file is conservatively queued and the sweep exits nonzero. The image queue is
+NUL-delimited, so source filenames may contain line breaks; `ocr_queue.sh` converts an older
+newline-delimited queue before using it.
 
 **Limits.**
 
@@ -56,10 +60,8 @@ the text.
 - A short page of real text that also holds an image, such as a logo, is listed, and `ocr_queue.sh`
   then replaces its sidecar with OCR text.
 - A PDF that cannot be extracted (locked, damaged) is counted as failed and written to the log. It is
-  not on the image-only list, and the exit status is still 0.
+  not on the image-only list, and the sweep exits nonzero.
 - A file without a `.pdf` extension is not seen.
-- The image-only list holds one path per line. A file whose name contains a line break is reported
-  as missing by `ocr_queue.sh` and is not OCR'd.
 - "Newer" is judged by modification time only. A PDF that is replaced by a different file with an
   older date keeps the sidecar and the OCR copy of the file before it; to force a re-read, delete
   both. A PDF dated in the future is extracted again on every run, and OCR'd again on every run if it
@@ -107,6 +109,7 @@ checksum or not.
 three come back. The canary values are assembled from pieces, so the script's own source does not
 contain an ID-shaped or card-shaped number. Prints the number of sidecars it scanned. At the end it
 prints a reminder that the report holds the matched numbers in full and has to be kept private.
+Traverses sidecars with NUL-delimited paths, including filenames with line breaks.
 
 **Limits.**
 
@@ -137,7 +140,8 @@ a term, with date, sender or recipients, subject and attachment names.
 files and marks each row `full` or `partial`. Opens the index read-only in a mode that still sees
 the newest rows. Restricts the term to a safe character set, since it is also used in a file name and
 a query. Ends the report with what it did not search: encoded bodies, attachments, the bodies of
-partial messages, the provider's web mailbox and accounts with no local copy.
+partial messages, the provider's web mailbox and accounts with no local copy. Counts and searches
+message files using NUL-delimited paths.
 
 **Limit.** The match is on the raw bytes of each file. An address in a header is found; a word inside
 an encoded body or an attachment is not.
@@ -211,7 +215,7 @@ server, the check and the request go to different servers.
 same because they have the same top-level folders. One side is then cleaned up.
 
 **What it does.** Lists files that are only in the synced tree, only in the local tree, or in both,
-keyed by file name and size, and optionally by checksum.
+keyed by file name and size, and optionally by SHA-256.
 
 **Built-in checks.** Takes a list of directory names to skip, for a copy of one tree kept inside the
 other. The summary it writes gives the file counts of both trees and states what the key can and
@@ -222,8 +226,10 @@ placeholder files (links, not documents), broken links, directories that cannot 
 directories inside either tree that are reached through a symbolic link and any directory named with
 `--skip` are left out. (A root that is itself a link is followed.) The
 usage text names the first seven and `--skip`; the summary counts none of them. A file that can be
-listed but not read is still compared by name and size. With `--md5`, if a file of the same name and
-size exists in the other tree, the run stops with an error before any report file is written.
+listed but not read is still compared by name and size. If hashing a shared file fails, no report is
+written. With `--hash`, a shared key is marked `same`
+when both sides hold the same set of SHA-256 digests: extra identical copies on one side do not make
+it `differ`, and one matching copy cannot hide another, differing copy with the same name and size. `--md5` remains an alias for `--hash`.
 
 ### `app_census.py`
 
@@ -262,8 +268,9 @@ issuer, last four or date; those rows need a look.
   slash comes directly before it, as at the end of a row of dots. So an unsigned figure directly after the label wins over a signed
   one further along the line, and of two unsigned figures the nearer one is taken, whatever it is.
   When two labels sit side by side above their figures, unsigned figures are read wrongly (the
-  second label takes the first figure) and signed ones are left blank. A credit balance is indexed
-  without its minus sign. Check the amounts against the page.
+  second label takes the first figure) and signed ones are left blank. A minus attached to the figure, or
+  directly before its currency sign, is kept in indexed amounts; a hyphen followed by a space is read
+  as a separator, not a sign. Check the amounts against the page.
 - The index step does not print how many sidecars or pages it read. A first page that the patterns
   do not recognise is counted nowhere: it is added to the page count of the statement before it, or
   dropped if it comes first.
@@ -285,7 +292,8 @@ one entry.
 
 **What it does.** Walks the widgets on each page and prints one row per widget: field name, position,
 the printed label to its left, the text above it, the value and, for buttons, the appearance state.
-It checks nothing; it prints what is there.
+It checks nothing; it prints what is there. A file that pdftotext cannot read is skipped with a
+warning, the remaining files are still listed, and the exit status is 1.
 
 **Limit.** The label and the text above a widget are found by position on the page. They are a guide
 to which box is which, and can be wrong on a dense form.
@@ -339,9 +347,10 @@ arguments show up in the process list and the shell history.
 
 **Limits.** `vision_ocr.py` reads at most 12 pages of each PDF unless given another limit, keeps at
 most 400,000 characters of text per PDF, and has no handling for a locked PDF. Each JSON line carries
-the page count, the number of pages it was allowed to read, the character count and any error.
-Compare the first two to see whether a PDF was longer than the limit, and look for a character count
-of zero.
+the total page count, pages selected (`ocr_pages`, as before), pages successfully recognized
+(`recognised_pages`), failed and unprocessed page counts, a `coverage_complete` flag, the character
+count and any error. A blank page whose Vision
+request completed counts as processed even though it contributes no text.
 
 ## Repository utilities (`tools/`)
 
@@ -355,6 +364,8 @@ backup folder.
 **Built-in checks.** Clones the new bundle and counts the commits and files it restored, before
 copying it (`SKIP_RESTORE=1` skips this step for a large repository). Compares the checksum of the copy
 with the source. Counts the uncommitted paths, which a bundle does not cover, and shows the first five.
+Accepts both ordinary repository directories and Git worktrees, and only their top folder: a
+subfolder or a `.git` folder is refused, because git would otherwise bundle the parent repository.
 
 **Limit.** Files that git ignores, a local config file for example, are not in the bundle and not in
 the count of uncommitted paths.
@@ -403,18 +414,20 @@ or a machine's clock is wrong and nothing shows it.
 **What they do.** `stamp.sh` prints the time in UTC and local time, read from the clock.
 `datecheck.sh` prints the HTTP `Date` header of several public sites next to the local clock, with
 each response's cache markers, since a cached response carries an old date. It prints; it does not
-compute a difference.
+compute a difference. It also prints each response's status line. It exits nonzero if a request fails to complete or a
+response has no Date header; an error status such as 403 still carries a Date and is not a failure.
 
 ## How the tools were checked
 
-`tests/run_checks.sh` covers the PDF text pipeline and the amount patterns of the scan intake: 43
-assertions over fixtures it generates itself (a text PDF, a short one, a one-page scan, a nearly
-blank scan, a 210-page scan, an OCR stand-in that fails after writing partial output, a root folder
-with `[`, `*` and `?` in its name, and two files that differ only in the case of the extension). It
+`tests/run_checks.sh` covers the PDF text pipeline and the amount patterns of the scan intake with
+shell assertions and focused Python regression tests over generated inputs (a text PDF, a short one,
+a one-page scan, a nearly blank scan, a 210-page scan, an OCR stand-in that fails after writing
+partial output, a root folder with `[`, `*` and `?` in its name, and two files that differ only in
+the case of the extension). It
 was run on Linux and on macOS with bash 3.2. On a file system that does not tell `a.pdf` from
 `a.PDF`, the five assertions on that pair are skipped.
 
-Everything else was checked by hand. Every document fixture is made up. Two kinds of tool need the
+Remaining behavior was checked by hand. Every document fixture is made up. Two kinds of tool need the
 machine itself: the mail tools were run against a local mail store, with only the counts they
 printed read, and the application census against the machine's own application list.
 
@@ -428,7 +441,10 @@ printed read, and the application census against the machine's own application l
 Two defects in the first published version were found by reading the code against this page. A scan
 of 200 pages or more was never listed for OCR, because the test counted bytes and the extractor
 writes one byte per page. An amount printed without a currency sign was indexed as its last digit
-and the cents. Both are fixed, and the check script holds a case for each.
+and the cents. Both are fixed, and the check script holds a case for each. The reliability regressions
+also cover negative balances and hyphen separators, extraction/OCR failures, duplicate comparisons,
+remote cleartext model URLs, datecheck failures and error responses, form-dump failures, worktree
+backups and refused subfolders, and OCR coverage counters.
 
 No sample documents ship with the repository. The check script generates its fixtures, and every
 value in them is invented.

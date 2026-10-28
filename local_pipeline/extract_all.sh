@@ -12,6 +12,7 @@
 # "Newer" is by modification time. To force a re-read, delete the sidecar and the OCR copy.
 # Read-only on sources: never modifies, moves or deletes a source file.
 # Output goes under <archive-root>/_DERIVED/. Runs on macOS bash 3.2 and Linux.
+# Exits 1 if any PDF extraction or short-text image check fails.
 # Needs: poppler (pdftotext, pdfimages). PDFTOOLS_BIN and OCR_TMPDIR are read by env.sh.
 
 . "$(dirname "$0")/env.sh" 2>/dev/null || true
@@ -30,6 +31,7 @@ OCRPDF="$ROOT/_DERIVED/ocr_pdf"
 MINCHARS=200          # below this many bytes of non-blank text, check whether the file is a scan
 
 command -v pdftotext >/dev/null || { echo "FATAL: pdftotext missing (install poppler; see env.sh)."; exit 1; }
+command -v pdfimages >/dev/null || { echo "FATAL: pdfimages missing (install poppler; see env.sh)."; exit 1; }
 
 mkdir -p "$DERIVED"
 : > "$IMAGEONLY"
@@ -66,9 +68,11 @@ for f in "${FILES[@]}"; do
     # A sidecar that has to be rebuilt for a PDF already OCR'd is rebuilt from the OCR copy, which
     # has the text layer. The scan itself would give an empty sidecar.
     src="$f"; [ "$ocrd" = 1 ] && src="$ocrcopy"
-    if pdftotext -layout -q "$src" "$out" 2>/dev/null; then
+    tmp_out="${out}.part.$$"
+    if pdftotext -layout -q "$src" "$tmp_out" 2>/dev/null && [ -f "$tmp_out" ] && mv -f "$tmp_out" "$out"; then
       fresh=1
     else
+      rm -f "$tmp_out"
       echo "FAIL_EXTRACT  $rel" >> "$LOG"; fail_n=$((fail_n+1)); continue
     fi
   fi
@@ -84,13 +88,29 @@ for f in "${FILES[@]}"; do
     #   raster images and no text    -> a scan; it needs OCR
     #   no raster images and no text -> a short document, already fully read
     # Without this test, every short cover page lands in the OCR queue.
-    rasters=$(pdfimages -list "$f" 2>/dev/null | tail -n +3 | wc -l | tr -d ' ')
+    if listing=$(pdfimages -list "$f" 2>/dev/null) && printf '%s\n' "$listing" | grep -q '^page[[:space:]]'; then
+      rasters=$(printf '%s\n' "$listing" | awk 'NR > 2 && $1 ~ /^[0-9]+$/ { n++ } END { print n+0 }')
+    else
+      if [ "$ocrd" != 1 ]; then
+        printf '%s\0' "$f" >> "$IMAGEONLY"
+        img_n=$((img_n+1))
+      fi
+      fail_n=$((fail_n+1))
+      echo "FAIL_IMAGE_CHECK  $rel" >> "$LOG"
+      if [ "$fresh" = 1 ]; then
+        done_n=$((done_n+1))
+        if [ $((done_n % 250)) -eq 0 ]; then
+          echo "  ... $done_n extracted / $skip_n skipped / $img_n image-only" | tee -a "$LOG"
+        fi
+      fi
+      continue
+    fi
     if [ "${rasters:-0}" -gt 0 ] && [ "$ocrd" = 1 ]; then
       # OCR has been run since the PDF last changed. A page with almost nothing on it has been read
       # once it has been OCR'd; it is not queued again.
       [ "$fresh" = 1 ] && echo "OCR_DONE_LITTLE_TEXT  ${chars} chars  ${rasters} rasters  $rel" >> "$LOG"
     elif [ "${rasters:-0}" -gt 0 ]; then
-      echo "$f" >> "$IMAGEONLY"; img_n=$((img_n+1))
+      printf '%s\0' "$f" >> "$IMAGEONLY"; img_n=$((img_n+1))
       [ "$fresh" = 1 ] && echo "IMAGE_ONLY  ${chars} chars  ${rasters} rasters  $rel" >> "$LOG"
     elif [ "$fresh" = 1 ]; then
       echo "SHORT_BUT_COMPLETE  ${chars} chars  0 rasters  $rel" >> "$LOG"
@@ -110,3 +130,4 @@ echo
 echo "Image-only files carry no searchable text. Until they are OCR'd, a search"
 echo "that finds nothing has not looked inside those $img_n documents."
 echo "Next: bash ocr_queue.sh \"$ROOT\""
+[ "$fail_n" -eq 0 ] || exit 1

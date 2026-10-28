@@ -16,7 +16,8 @@ Rules built in:
 
 Usage: python3 local_triage.py <directory> [--model qwen3:8b] [--limit 200] [--out index.tsv]
   --limit is the number of new files to index in this run.
-Environment: OLLAMA_URL (default http://localhost:11434), TRIAGE_CONFIG (another config file).
+Environment: OLLAMA_URL (default http://localhost:11434); remote HTTP requires OLLAMA_ALLOW_REMOTE=1.
+TRIAGE_CONFIG selects another config file.
 Needs: a pulled Ollama model and config.local.json beside this script (copy config.example.json).
 """
 import argparse
@@ -27,6 +28,7 @@ import re
 import sys
 import time
 import urllib.request
+from urllib.parse import urlsplit
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
 
@@ -41,6 +43,22 @@ TEXT:
 """
 BAD_CARD = {'answers': '', 'entities': [], 'dates': [], 'kind': 'other', 'needs_human': True}
 FAILED = ('ERROR ', 'UNPARSEABLE MODEL OUTPUT')   # rows that start like this are retried on resume
+
+
+def validate_ollama_url(url):
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+    except ValueError:
+        sys.exit('OLLAMA_URL must be a valid http(s) URL without embedded credentials or query parameters')
+    if parsed.scheme not in ('http', 'https') or not hostname or parsed.username or parsed.password \
+            or parsed.query or parsed.fragment:
+        sys.exit('OLLAMA_URL must be an http(s) URL without embedded credentials')
+    local_hosts = ('localhost', '127.0.0.1', '::1')
+    if parsed.scheme == 'http' and hostname.lower() not in local_hosts \
+            and os.environ.get('OLLAMA_ALLOW_REMOTE') != '1':
+        sys.exit('remote HTTP Ollama may expose document text; use HTTPS or set OLLAMA_ALLOW_REMOTE=1 to accept the risk')
+    return url.rstrip('/')
 
 
 def load_config():
@@ -119,6 +137,8 @@ def wait_for_model_slot(model, max_wait=1800):
 
 
 def main():
+    global OLLAMA
+    OLLAMA = validate_ollama_url(OLLAMA)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('directory')
     ap.add_argument('--model', default='qwen3:8b')

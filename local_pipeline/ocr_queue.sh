@@ -30,7 +30,18 @@ QUEUE=$(ls -t "$ROOT/_DERIVED"/_image_only_*.txt 2>/dev/null | head -1)
 command -v ocrmypdf >/dev/null || { echo "FATAL: ocrmypdf missing (see env.sh)."; exit 1; }
 [ -n "${QUEUE:-}" ] && [ -s "$QUEUE" ] || { echo "No image-only PDFs queued. Run extract_all.sh first; if it reported 0 image-only, there is nothing to OCR."; exit 1; }
 
-N=$(wc -l < "$QUEUE" | tr -d ' ')
+# Convert a queue written by older versions (one path per line) before reading it.
+if LC_ALL=C tr -d '\000' < "$QUEUE" | cmp -s "$QUEUE" -; then
+  tmp_queue="${QUEUE}.part.$$"
+  while IFS= read -r f || [ -n "$f" ]; do
+    [ -n "$f" ] && printf '%s\0' "$f"
+  done < "$QUEUE" > "$tmp_queue"
+  mv -f "$tmp_queue" "$QUEUE" || { rm -f "$tmp_queue"; echo "FATAL: could not convert the legacy image-only queue"; exit 1; }
+fi
+
+N=0
+while IFS= read -r -d '' _queued_file; do [ -n "$_queued_file" ] && N=$((N+1)); done < "$QUEUE"
+[ "$N" -gt 0 ] || { echo "FATAL: image-only queue has no valid paths; rerun extract_all.sh."; exit 1; }
 echo "$N image-only PDFs queued (from $QUEUE)"
 echo "OCR is slow: expect a few seconds per page."
 ok=
@@ -43,7 +54,8 @@ fi
 [ "$ok" = "y" ] || { echo "Nothing was OCR'd."; exit 0; }
 
 ok_n=0; done_n=0; fail_n=0; miss_n=0
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
+  [ -n "$f" ] || continue
   rel="${f#"$ROOT"/}"             # the root is quoted: a [, * or ? in its name is not a pattern
   if [ ! -f "$f" ]; then miss_n=$((miss_n+1)); echo "  MISSING  $rel"; continue; fi
   side="$DERIVED/${rel}.txt"

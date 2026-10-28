@@ -34,8 +34,10 @@ output of the same name without asking.
 | `tests/run_checks.sh` | generated fixtures and what the pipeline makes of them | the work folder you name, or a new temporary folder; OCR staging files in `~/.ocrtmp` |
 
 **The only things they delete are their own temporary files:** the canary file of `pii_sweep.sh`,
-the partial outputs of a failed OCR in `ocr_queue.sh`, the page images of the Vision OCR tools and
-the work folder of `backup_repo_bundle.sh`.
+the partial sidecar of a failed extraction in `extract_all.sh`, the partial outputs of a failed OCR
+in `ocr_queue.sh`, the page images of the Vision OCR tools and the work folder of
+`backup_repo_bundle.sh`. `ocr_queue.sh` also rewrites a queue file in the old one-path-per-line
+format (its own earlier output) in place, and removes its temporary copy if the rewrite fails.
 `restore_test_bundle_chain.sh` leaves its scratch clone in place. It prints where the clone is when
 the test runs, and not when it stops with status 2.
 
@@ -45,8 +47,10 @@ The document and mail tools call no web service. These can reach outside, each b
 command you choose:
 
 - **The local model.** `ask_local.sh` and `local_triage.py` send text to the address in `OLLAMA_URL`,
-  which defaults to this machine. If you point it at another host, the text of your documents goes
-  to that host.
+  which defaults to this machine. A non-loopback HTTP endpoint is refused unless
+  `OLLAMA_ALLOW_REMOTE=1` is set; HTTPS endpoints are allowed. If you point either tool at another
+  host, the text of your documents goes to that host. Use the opt-in only when that transfer is
+  intended and the network is trusted.
 - **The backup.** `backup_repo_bundle.sh` copies a bundle of the whole repository history to the
   folder in `BACKUP_DEST`. If a sync client uploads that folder, the bundle leaves the machine.
 - **The clock check.** `datecheck.sh` requests the headers of the websites you name, or of four
@@ -122,8 +126,9 @@ So each rule on the design page is attached to the act it guards:
 
 A check that runs every time costs a second. A check that depends on memory fails without a sound.
 
-Not every check stops the run. A failed extraction and a form entry that matched nothing are
-printed, and the tool still exits with status 0. The last lines of the output have to be read.
+Not every check stops the run. A failed extraction is logged, the run goes on with the next file,
+and `extract_all.sh` exits with status 1 at the end. A form entry that matched nothing is printed
+and the form filler still exits with status 0. The last lines of the output have to be read.
 
 This matters most when the operator is an AI assistant. An assistant can follow a written
 instruction a thousand times and miss it once, with no sign that anything was missed. These tools

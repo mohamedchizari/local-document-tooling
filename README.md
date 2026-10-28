@@ -17,14 +17,15 @@ guard rails.
 - give every PDF a searchable text file, and OCR the scans (`local_pipeline/`)
 - check a redaction for ID-shaped and card-shaped numbers
 - read the Apple Mail store directly, and sweep it for phishing
-- build a pointer index with a local model (Ollama, on this machine)
+- build a pointer index with an Ollama model (loopback by default)
 - inspect, fill and check PDF forms (`pdf_forms/`)
 - turn a stack of scanned paper statements into one CSV (`scan_intake/`)
 
 Two utilities in `tools/` do reach outside the machine, by design: `backup_repo_bundle.sh` copies a git
 bundle to a backup folder you name (which may be one that syncs to a cloud), and `datecheck.sh` reads
 the `Date` header of a few public websites. The two local-model tools send text to the address in
-`OLLAMA_URL`, which is this machine unless you change it.
+`OLLAMA_URL`, which defaults to loopback. Sending text to a non-loopback HTTP Ollama server requires
+`OLLAMA_ALLOW_REMOTE=1`; HTTPS endpoints are allowed without that opt-in.
 
 `TOOL_INDEX.md` lists every tool in one line each. The header of each file gives its usage and, where
 they apply, the environment variables it reads and what it needs installed.
@@ -118,8 +119,9 @@ does not see names, addresses, phone numbers or prose that says too much, it ski
   its output as a list to look at.
 - The form filler estimates text width from character counts; `check_field_fit.py` measures in Helvetica.
 - `tests/run_checks.sh` checks the PDF text pipeline and the amount patterns of `scan_intake.py`
-  against fixtures it generates. The other tools have no automated check; they were checked by hand
-  on macOS, and several of them also on Linux. `docs/DESIGN.md` says what was run.
+  against generated fixtures and runs focused regression tests for selected reliability fixes.
+  Remaining behavior was checked by hand on macOS, and several tools also on Linux.
+  `docs/DESIGN.md` says what was run.
 - `extract_all.sh` judges a PDF as a whole. A PDF that mixes text pages and scanned pages passes, and
   its scanned pages stay unread.
 - `docs/DESIGN.md` lists the other known limits, tool by tool.

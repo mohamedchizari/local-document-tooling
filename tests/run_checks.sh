@@ -21,8 +21,14 @@ pass=0; fail=0
 ok(){ if eval "$2"; then pass=$((pass+1)); echo "PASS  $1"; else fail=$((fail+1)); echo "FAIL  $1"; fi; }
 nb(){ LC_ALL=C tr -d '[:space:]' < "$1" 2>/dev/null | wc -c | tr -d ' '; }      # bytes of non-blank text
 queue(){ ls -t "$1/_DERIVED"/_image_only_*.txt 2>/dev/null | head -1; }         # newest image-only list
-qn(){ q=$(queue "$1"); [ -n "$q" ] && wc -l < "$q" | tr -d ' ' || echo 0; }     # lines in it
-inq(){ grep -c -F -- "$2" "$(queue "$1")" 2>/dev/null; }                        # lines that hold a path
+qn(){ q=$(queue "$1"); [ -n "$q" ] || { echo 0; return; }; n=0; while IFS= read -r -d '' _; do n=$((n+1)); done < "$q"; echo "$n"; }
+inq(){ "$PY" - "$(queue "$1")" "$2" <<'PY'
+import os, sys
+needle = sys.argv[2]
+with open(sys.argv[1], 'rb') as f:
+    print(sum(needle in os.fsdecode(path) for path in f.read().split(b'\0') if path))
+PY
+}                        # lines that hold a path
 num(){ sed -n "s/^ *$1 \([0-9][0-9]*\).*/\1/p" | head -1; }                    # a count from the summary
 sum(){ if command -v md5sum >/dev/null; then md5sum < "$1" | cut -c1-32; else md5 -q "$1"; fi; }
 old(){ touch -t 202601010000 "$@"; }                                            # a source older than any output
@@ -114,7 +120,7 @@ ok "6b OCR'd 1 again, exit 0" '[ $rc -eq 0 ] && echo "$out" | grep -q "OCR.d 1, 
 ok "6c then not listed" 'o=$(bash "$EX" "$R" 2>&1); [ "$(echo "$o" | num image-only)" = 0 ]'
 
 echo "=== 7 a stale queue: one file already done, one file gone"
-{ cat "$W/queue_with_scan_text.txt"; echo "$RP/gone.pdf"; } > "$(queue "$R")"
+{ cat "$W/queue_with_scan_text.txt"; printf '%s\0' "$RP/gone.pdf"; } > "$(queue "$R")"
 out=$(OCR_YES=1 bash "$OQ" "$R" 2>&1); rc=$?
 ok "7a OCR'd 0, already done 1, failed 0, missing 1; exit 1" '[ $rc -eq 1 ] && echo "$out" | grep -q "OCR.d 0, already done 1, failed 0, missing 1"'
 
@@ -171,7 +177,7 @@ cases = [
  ('new_balance', 'Previous Balance $100.00 New Balance 1,234.56 Minimum Payment Due $25.00', '1,234.56'),
  ('new_balance', 'New Balance 1,234.567', None),
  ('new_balance', 'New Balance none', None),
- ('new_balance', 'New Balance -$50.00', '50.00'),
+ ('new_balance', 'New Balance -$50.00', '-50.00'),
  ('new_balance', 'New Balance' + ' ' * 40 + '1,234.56', '1,234.56'),
  ('new_balance', 'New Balance   Minimum Payment Due\n1,234.56   25.00', '1,234.56'),
  ('min_due', 'New Balance   Minimum Payment Due\n1,234.56   25.00', '1,234.56'),
@@ -192,6 +198,7 @@ D="$W/idx"; mkdir -p "$D"
 printf 'Made-up issuer Chase\nPage 1 of 1\nAccount ending in 4321\nStatement Closing Date 01/15/2030\nNew Balance 1,234.56\nMinimum Payment Due 35.00\n' > "$D/typed.txt"
 "$PY" "$TREE/scan_intake/scan_intake.py" index "$D" "$W/idx_out.csv" >/dev/null 2>&1
 ok "11z index row: Chase,4321,01/15/2030,\"1,234.56\",35.00" 'grep -q "typed.txt,1,Chase,4321,01/15/2030,\"1,234.56\",35.00,1" "$W/idx_out.csv"'
+ok "17 focused reliability regressions" '"$PY" -m unittest discover -s "$TREE/tests" -p "test_reliability.py"'
 
 echo
 echo "TOTAL: pass $pass, fail $fail"

@@ -71,33 +71,84 @@ def ocr_png(path):
     return ""
 
 
+def ocr_png_with_status(path):
+    """Return OCR text and whether either Vision recognition request completed."""
+    succeeded = False
+    for level in (0, 1):
+        lines = _recognise(path, level)
+        if lines is not None:
+            succeeded = True
+            if lines:
+                return "\n".join(lines), True
+    return "", succeeded
+
+
+def coverage_metrics(page_count, maxpages, recognised_pages, failed_pages, opened, error):
+    """'ocr_pages' keeps its earlier meaning (pages selected for OCR); 'recognised_pages' is new."""
+    return {
+        'ocr_pages': min(page_count, maxpages),
+        'recognised_pages': recognised_pages,
+        'failed_pages': failed_pages,
+        'unprocessed_pages': max(0, page_count - recognised_pages - failed_pages),
+        'coverage_complete': opened and not error and recognised_pages == page_count,
+    }
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     pdflist, outp = sys.argv[1], sys.argv[2]
     maxpages = int(sys.argv[3]) if len(sys.argv) > 3 else 12
+    if maxpages < 1:
+        sys.exit("max-pages-per-pdf must be at least 1")
     pdfs = [l.rstrip('\n') for l in open(pdflist) if l.strip()]
     # page images are private; the temporary folder is removed when the run ends
     with tempfile.TemporaryDirectory(prefix='vision_ocr_') as tmp, open(outp, 'w') as out:
         for i, p in enumerate(pdfs):
             txt, npg, err = [], 0, ''
+            recognised_pages = failed_pages = 0
+            opened = False
+            page_errors = []
             try:
                 d = PDFDocument_.alloc().initWithURL_(NSURL.fileURLWithPath_(p))
-                npg = int(d.pageCount()) if d else 0
-                for k in range(min(npg, maxpages)):
-                    png = os.path.join(tmp, f"p{i}_{k}.png")
-                    if page_png(d.pageAtIndex_(k), png):
-                        txt.append(ocr_png(png))
-                    if os.path.exists(png):
-                        os.remove(png)
+                if d is None:
+                    err = "could not open PDF"
+                else:
+                    opened = True
+                    npg = int(d.pageCount())
+                    for k in range(min(npg, maxpages)):
+                        png = os.path.join(tmp, f"p{i}_{k}.png")
+                        try:
+                            if page_png(d.pageAtIndex_(k), png):
+                                text, succeeded = ocr_png_with_status(png)
+                                txt.append(text)
+                                if succeeded:
+                                    recognised_pages += 1
+                                else:
+                                    failed_pages += 1
+                                    page_errors.append(f"recognition failed on page {k + 1}")
+                            else:
+                                failed_pages += 1
+                                page_errors.append(f"page render failed on page {k + 1}")
+                        except Exception as e:
+                            failed_pages += 1
+                            page_errors.append(f"page {k + 1}: {str(e)[:120]}")
+                        finally:
+                            if os.path.exists(png):
+                                os.remove(png)
             except Exception as e:
                 err = str(e)[:200]
+            if page_errors:
+                err = "; ".join(([err] if err else []) + page_errors)[:500]
             t = "\n".join(txt)
+            coverage = coverage_metrics(npg, maxpages, recognised_pages, failed_pages, opened, err)
             out.write(json.dumps({'pdf': p, 'name': os.path.basename(p),
-                                  'pages': npg, 'ocr_pages': min(npg, maxpages),
+                                  'pages': npg, **coverage,
                                   'chars': len(t.strip()), 'err': err,
                                   'text': t[:400000]}) + "\n")
-            print(f"{i+1}/{len(pdfs)} {os.path.basename(p)[:52]} pages={npg} chars={len(t.strip())} {err}", flush=True)
+            print(f"{i+1}/{len(pdfs)} {os.path.basename(p)[:52]} pages={npg} "
+                  f"recognised={recognised_pages}/{min(npg, maxpages)} failed={failed_pages} "
+                  f"unprocessed={coverage['unprocessed_pages']} chars={len(t.strip())} {err}", flush=True)
 
 
 if __name__ == '__main__':

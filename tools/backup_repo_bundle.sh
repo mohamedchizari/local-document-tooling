@@ -3,6 +3,7 @@
 # prove that it restores, copy it to a backup folder and check the copy by checksum.
 #
 #   usage: REPO=/path/to/repo BACKUP_DEST=/path/to/backup/folder bash tools/backup_repo_bundle.sh
+#   REPO must be the top folder of a work tree (a linked worktree is fine); a subfolder or a .git folder is refused.
 #   SKIP_RESTORE=1 skips the restore test (a large repo can take minutes); the checksum check still runs.
 #
 # BACKUP_DEST can be any folder, for example one that a sync client uploads. If it is, the bundle
@@ -14,7 +15,12 @@
 set -u
 REPO="${REPO:?set REPO to the repo path}"
 DEST="${BACKUP_DEST:?set BACKUP_DEST to the backup folder}"
-[ -d "$REPO/.git" ] || { echo "FAIL: $REPO is not a git repo"; exit 1; }
+[ -d "$REPO" ] || { echo "FAIL: $REPO is not a folder"; exit 1; }
+REPO="$(cd "$REPO" && pwd -P)" || exit 1
+# Only the top folder of a work tree: from a subfolder or from .git, git would bundle the whole parent repo.
+[ "$(git -C "$REPO" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] \
+  && [ "$(git -C "$REPO" rev-parse --show-toplevel 2>/dev/null)" = "$REPO" ] \
+  || { echo "FAIL: $REPO is not the top folder of a git work tree"; exit 1; }
 [ -d "$DEST" ]      || { echo "FAIL: backup folder not found: $DEST"; exit 1; }
 
 sum() {  # checksum with whichever tool this system has
